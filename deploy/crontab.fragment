@@ -1,0 +1,5 @@
+# Voorraadchecker: gegevens ophalen bij bol (06:10 en 13:10) en weekadvies op maandag 07:00
+10 6,13 * * * cd /home/ralphmeijer/voorraadchecker && /usr/bin/python3 vc.py sync >> logs/cron.log 2>&1
+0 7 * * 1 cd /home/ralphmeijer/voorraadchecker && /usr/bin/python3 vc.py weekmail >> logs/cron.log 2>&1
+# Voorraadchecker: nachtelijke reservekopie van de database (14 dagen bewaard)
+30 2 * * * cd /home/ralphmeijer/voorraadchecker && /usr/bin/python3 vc.py reservekopie >> logs/cron.log 2>&1

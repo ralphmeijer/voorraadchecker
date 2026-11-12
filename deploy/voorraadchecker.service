@@ -1,0 +1,18 @@
+[Unit]
+Description=Voorraadchecker (dashboard)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ralphmeijer
+WorkingDirectory=/home/ralphmeijer/voorraadchecker
+ExecStart=/usr/bin/python3 /home/ralphmeijer/voorraadchecker/vc.py serve --port 8768
+Restart=always
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target

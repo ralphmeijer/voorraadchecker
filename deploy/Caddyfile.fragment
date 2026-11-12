@@ -1,0 +1,8 @@
+
+# Voorraadchecker (LvB-aanvuladvies): https met automatisch certificaat
+voorraad.141-138-137-119.sslip.io {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8768
+	header -Server
+	header Strict-Transport-Security "max-age=31536000"
+}

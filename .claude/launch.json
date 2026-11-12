@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "voorraadchecker",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["vc.py", "serve", "--port", "8768"],
+      "port": 8768
+    }
+  ]
+}
