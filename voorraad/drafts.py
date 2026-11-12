@@ -59,7 +59,13 @@ def refresh(conn, ch, adapter, draft) -> None:
     """Werkt een voorbereide zending bij met wat de marketplace intussen heeft teruggemeld."""
     did = draft["id"]
     if draft["status"] == "adressen":
-        st = adapter.process_status(draft["dest_process"])
+        try:
+            st = adapter.process_status(draft["dest_process"])
+        except ChannelError as e:
+            if "(404)" not in str(e):
+                raise
+            # Bol bewaart een verzoek maximaal een dag: daarna is het antwoord niet meer op te halen.
+            st = {"status": "FAILURE", "entity_id": None, "error": "Het adresverzoek is verlopen. Start een nieuwe voorbereiding."}
         if st["status"] == "SUCCESS":
             dests = adapter.get_destinations(st["entity_id"])
             for n, d in enumerate(dests, 1):

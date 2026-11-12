@@ -104,6 +104,18 @@ def logo(code, name):
     return '<span class="mono" aria-hidden="true">%s</span>' % esc((name or code)[:1].upper())
 
 
+def static_version():
+    """Verandert zodra stylesheet of script wijzigt, zodat browsers nooit een oude versie blijven gebruiken."""
+    from . import config
+    try:
+        return "%d" % max((config.ROOT / "static" / f).stat().st_mtime for f in ("style.css", "app.js"))
+    except OSError:
+        return "0"
+
+
+WAIT = '<span class="spin" role="img" aria-label="Bezig"></span>'
+
+
 def layout(title, body, user=None, channels=(), current=None, active="", flash=None):
     nav = ""
     if user:
@@ -131,9 +143,9 @@ def layout(title, body, user=None, channels=(), current=None, active="", flash=N
         note = '<div class="flash %s" role="status">%s</div>' % (esc(flash[0]), esc(flash[1]))
     return ('<!doctype html><html lang="nl"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            '<title>%s · Voorraadchecker</title><link rel="stylesheet" href="/static/style.css">'
-            '</head><body>%s<main>%s%s</main><script src="/static/app.js" defer></script></body></html>') % (
-        esc(title), nav, note, body)
+            '<title>%s · Voorraadchecker</title><link rel="stylesheet" href="/static/style.css?v=%s">'
+            '</head><body>%s<main>%s%s</main><script src="/static/app.js?v=%s" defer></script></body></html>') % (
+        esc(title), static_version(), nav, note, body, static_version())
 
 
 def login_page(error=None):
@@ -324,8 +336,8 @@ def shipment_page(ch, user, draft, groups, unassigned, all_lines, dates, refs, t
              '<input type="hidden" name="kanaal" value="%s"><button class="link">Voorbereiding sluiten</button> '
              '<span class="muted">Wat nog niet is aangemaakt vervalt; aangemaakte zendingen blijven bestaan.</span></form>') % (draft["id"], csrf, esc(code))
     if draft["status"] == "adressen":
-        return head + ('<div class="calm" data-refresh="4"><b>Bol zoekt de magazijnadressen op.</b> Dit duurt meestal minder dan een minuut; '
-                       'deze pagina ververst vanzelf.</div><section><h2>Goedgekeurde regels</h2>%s</section>%s') % (_lines_table(all_lines), close)
+        return head + ('<div class="calm wait" data-refresh="4">' + WAIT + '<span><b>Bol zoekt de magazijnadressen op.</b> Dit duurt meestal minder dan een minuut; '
+                       'deze pagina ververst vanzelf.</span></div><section><h2>Goedgekeurde regels</h2>%s</section>%s') % (_lines_table(all_lines), close)
     if draft["status"] == "mislukt":
         return head + '<div class="flash bad" role="alert">Bol kon de adressen niet bepalen: %s</div><section>%s</section>%s' % (
             esc(draft["error"] or ""), _lines_table(all_lines), close)
@@ -364,11 +376,11 @@ def shipment_page(ch, user, draft, groups, unassigned, all_lines, dates, refs, t
         elif state == "verstuurd":
             waiting = True
             status = '<span class="pill dead">Wordt aangemaakt</span>'
-            form = '<div class="calm"><b>Bol verwerkt de zending %s.</b> Deze pagina ververst vanzelf.</div>' % esc(g["reference"] or "")
+            form = '<div class="calm wait">' + WAIT + '<span><b>Bol verwerkt de zending %s.</b> Deze pagina ververst vanzelf.</span></div>' % esc(g["reference"] or "")
         elif state == "annuleren":
             waiting = True
             status = '<span class="pill dead">Wordt geannuleerd</span>'
-            form = '<div class="calm">Bol verwerkt de annulering. Deze pagina ververst vanzelf.</div>'
+            form = '<div class="calm wait">' + WAIT + '<span><b>Bol verwerkt de annulering.</b> Deze pagina ververst vanzelf.</span></div>'
         elif state == "aangemaakt":
             status = '<span class="pill ok">Aangemaakt bij bol</span>'
             err = '<div class="flash bad" role="alert">%s</div>' % esc(g["error"]) if g["error"] else ""

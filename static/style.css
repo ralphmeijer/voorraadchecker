@@ -163,3 +163,10 @@ input.qty { width: 92px; border: 1px solid var(--line); background: var(--card);
 .ship .scroll { margin: 12px 0; }
 .ship .edit { border: 0; padding: 0; margin: 0; }
 .check { flex-direction: row !important; align-items: center; gap: 8px !important; color: var(--ink) !important; font-size: 14px !important; }
+
+/* Wachten op de marketplace */
+.wait { display: flex; align-items: center; gap: 14px; }
+.spin { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--track); border-top-color: var(--accent);
+  animation: draai 0.9s linear infinite; }
+@keyframes draai { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }

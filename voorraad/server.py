@@ -78,7 +78,9 @@ class Handler(BaseHTTPRequestHandler):
             flash = ("good", self.q["ok"][0][:300])
         elif self.q.get("fout"):
             flash = ("bad", self.q["fout"][0][:300])
-        self.send(200, views.layout(title, body, self.user, self.chans, self.ch["code"] if self.ch else None, active, flash))
+        # Wachtpagina's verversen ook zonder script: de browser volgt de Refresh-kop.
+        headers = [("Refresh", "4; url=%s?kanaal=%s" % (urlparse(self.path).path, quote(self.ch["code"])))] if 'data-refresh="' in body and self.ch else None
+        self.send(200, views.layout(title, body, self.user, self.chans, self.ch["code"] if self.ch else None, active, flash), headers=headers)
 
     def cookie(self, token, max_age):
         secure = "; Secure" if config.get("VC_COOKIE_SECURE", "0") == "1" else ""
