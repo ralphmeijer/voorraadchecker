@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from datetime import date, timedelta
 
-STATUS_ORDER = ["Kritiek", "Aanvullen", "OK", "Overstock", "Dood", "Niet aanvullen"]
+STATUS_ORDER = ["Kritiek", "Aanvullen", "OK", "Overstock", "Dood", "Gepauzeerd", "End of life"]
 
 
 def _params(ch):
@@ -64,6 +64,7 @@ def compute(conn, ch):
 
     days_v = [(refd - timedelta(days=i)).isoformat() for i in range(V, 0, -1)]  # oud -> nieuw
     half = V // 2
+    paused = {r["ean"]: r for r in conn.execute("SELECT ean, username, paused_at FROM paused WHERE channel=?", (code,))}
     from .photos import available
     with_photo = available(conn)
     rows = []
@@ -84,7 +85,13 @@ def compute(conn, ch):
         v28 = ordered28 / 28 if ordered28 is not None else None
         cover = stock / v if v > 0 else None
         onderweg = inbound.get(ean, [0])[0] + marked.get(ean, 0)
-        mode = s["mode"] or "normaal"
+        # End of life geldt voor alle kanalen; pauzeren geldt alleen voor dit kanaal.
+        if s["mode"] == "eol":
+            mode = "eol"
+        elif ean in paused or s["mode"] == "uit":
+            mode = "pauze"
+        else:
+            mode = "normaal"
         unit = s["order_unit"]
         need = 0
         if v > 0 and cover <= p["trigger"] and mode == "normaal":
@@ -92,8 +99,10 @@ def compute(conn, ch):
         units = math.ceil(need / unit) if need and unit else None
         deliver = units * unit if units else (need if need and not unit else 0)
 
-        if mode != "normaal":
-            status = "Niet aanvullen"
+        if mode == "eol":
+            status = "End of life"
+        elif mode == "pauze":
+            status = "Gepauzeerd"
         elif ordered == 0 and stock == 0 and onderweg > 0:
             status = "OK"  # nieuw artikel: nog niets te verkopen, de eerste voorraad komt eraan
         elif ordered == 0:
@@ -108,6 +117,11 @@ def compute(conn, ch):
             status = "OK"
 
         signals = []
+        if mode != "normaal" and stock > 0:
+            signals.append(("info", "Restvoorraad %d stuks%s" % (
+                stock, ", nog ongeveer %d dagen" % round(cover) if cover is not None else ", geen verkoop")))
+        if mode == "pauze" and ean in paused:
+            signals.append(("note", "Gepauzeerd door %s op %s" % (paused[ean]["username"] or "onbekend", (paused[ean]["paused_at"] or "")[:10])))
         if need and not unit:
             signals.append(("warn", "Besteleenheid ontbreekt"))
         if status in ("Kritiek", "Aanvullen") and need == 0 and onderweg:

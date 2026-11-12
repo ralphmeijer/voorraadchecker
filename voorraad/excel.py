@@ -11,7 +11,7 @@ from openpyxl.utils import get_column_letter
 from .calc import logistics_rows
 
 COLORS = {"Kritiek": "F8C9C4", "Aanvullen": "FCE3B0", "OK": "CFE8D2", "Overstock": "CFE0F5",
-          "Dood": "DDDDDD", "Niet aanvullen": "EEEEEE"}
+          "Dood": "DDDDDD", "Gepauzeerd": "EEEEEE", "End of life": "E4E0EA"}
 HEAD_FILL = PatternFill("solid", start_color="1F2A37")
 HEAD_FONT = Font(bold=True, color="FFFFFF")
 THIN = Side(style="thin", color="BBBBBB")
@@ -85,7 +85,8 @@ def build(result, channel_name: str) -> bytes:
               ("OK", "Dekking tussen besteltrigger en 1,5x doel: geen actie"),
               ("Overstock", "Dekking boven 1,5x doel: geen zending"),
               ("Dood", "Geen verkoop in de velocity-periode: niet aanvullen"),
-              ("Niet aanvullen", "End of life of handmatig uitgezet")]
+              ("Gepauzeerd", "Op dit kanaal gepauzeerd: niet aanvullen"),
+              ("End of life", "Artikel loopt uit: niet meer aanvullen")]
     for i, (status, text) in enumerate(legend):
         c = wi.cell(row=17 + i, column=1, value=status)
         c.fill, c.border = PatternFill("solid", start_color=COLORS[status]), BOX
@@ -119,10 +120,10 @@ def build(result, channel_name: str) -> bytes:
         wa.cell(row=n, column=12, value='=IF(AND(J{n}>0,N(K{n})>0),ROUNDUP(J{n}/K{n},0),0)'.format(n=n))
         wa.cell(row=n, column=13, value='=IF(N(K{n})>0,L{n}*K{n},J{n})'.format(n=n))
         wa.cell(row=n, column=14, value=(
-            '=IF(O{n}<>"","Niet aanvullen",IF(E{n}=0,"Dood",IF(H{n}<{S}$B$10,"Kritiek",'
+            '=IF(O{n}<>"",O{n},IF(E{n}=0,"Dood",IF(H{n}<{S}$B$10,"Kritiek",'
             'IF(AND(H{n}<={S}$B$7,J{n}>0),"Aanvullen",IF(H{n}>1.5*{S}$B$4,"Overstock","OK")))))'
         ).format(n=n, S=S))
-        wa.cell(row=n, column=15, value={"eol": "EOL", "uit": "Uit"}.get(r["mode"], ""))
+        wa.cell(row=n, column=15, value={"eol": "End of life", "pauze": "Gepauzeerd"}.get(r["mode"], ""))
         wa.cell(row=n, column=16, value=r["ordered28"] if r["ordered28"] is not None else "")
         wa.cell(row=n, column=17, value=r["returns"])
         wa.cell(row=n, column=18, value=r["unsellable"])

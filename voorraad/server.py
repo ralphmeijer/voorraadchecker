@@ -267,7 +267,7 @@ class Handler(BaseHTTPRequestHandler):
             result = calc.compute(conn, ch)
             status = (self.q.get("status") or [""])[0]
             return self.page("Alle artikelen", views.articles(result, ch, status if status in calc.STATUS_ORDER else "",
-                                                               bool(self.q.get("zonder"))), "artikelen")
+                                                               bool(self.q.get("zonder")), self.user), "artikelen")
         if path.startswith("/artikel/"):
             ean = norm_ean(path[9:])
             result = calc.compute(conn, ch)
@@ -381,6 +381,37 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError, ChannelError) as e:
                 conn.rollback()
                 return self.back(target, code, bad=str(e))
+        if path == "/artikelen/actie":
+            actie = form.get("actie")
+            terug = form.get("terug") if re.fullmatch(r"/|/artikelen|/artikel/\d{13}", form.get("terug") or "") else "/artikelen"
+            known = {r[0] for r in conn.execute("SELECT ean FROM listings WHERE channel=?", (code,))}
+            eans = [e for e in (norm_ean(k[4:]) for k in form if k.startswith("sel_")) if e in known]
+            if not eans:
+                return self.back(terug, code, bad="Vink eerst een of meer artikelen aan")
+            if actie in ("eol", "eol-opheffen") and user["role"] != "beheer":
+                return self.back(terug, code, bad="Alleen een beheerder kan end of life instellen")
+            if actie == "pauzeren":
+                for e in eans:
+                    conn.execute("INSERT OR IGNORE INTO paused(channel, ean, username, paused_at) VALUES(?,?,?,datetime('now','localtime'))",
+                                 (code, e, user["username"]))
+                done = "gepauzeerd op %s" % ch["name"]
+            elif actie == "activeren":
+                for e in eans:
+                    conn.execute("DELETE FROM paused WHERE channel=? AND ean=?", (code, e))
+                    conn.execute("UPDATE products SET mode='normaal' WHERE ean=? AND mode='uit'", (e,))
+                done = "weer actief op %s" % ch["name"]
+            elif actie == "eol":
+                for e in eans:
+                    conn.execute("UPDATE products SET mode='eol', updated_at=datetime('now') WHERE ean=?", (e,))
+                done = "op end of life gezet voor alle kanalen"
+            elif actie == "eol-opheffen":
+                for e in eans:
+                    conn.execute("UPDATE products SET mode='normaal', updated_at=datetime('now') WHERE ean=? AND mode='eol'", (e,))
+                done = "niet langer end of life"
+            else:
+                return self.back(terug, code, bad="Kies een actie")
+            conn.commit()
+            return self.back(terug, code, ok="%d %s %s" % (len(eans), "artikel" if len(eans) == 1 else "artikelen", done))
         if path == "/afwijking/afhandelen":
             if (form.get("id") or "").isdigit():
                 shipments.handle(conn, code, int(form["id"]), user["username"])
@@ -397,7 +428,7 @@ class Handler(BaseHTTPRequestHandler):
             ean = norm_ean(path[9:])
             if not ean or not conn.execute("SELECT 1 FROM products WHERE ean=?", (ean,)).fetchone():
                 return self.back("/artikelen", code, bad="Artikel niet gevonden")
-            mode = form.get("mode") if form.get("mode") in ("normaal", "eol", "uit") else "normaal"
+            mode = "eol" if form.get("mode") == "eol" else "normaal"
             unit = None
             if form.get("order_unit"):
                 try:

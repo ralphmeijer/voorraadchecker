@@ -19,3 +19,17 @@
   var auto = document.querySelector("[data-autosubmit]");
   if (auto) auto.addEventListener("change", function () { auto.form.submit(); });
 })();
+
+// Schakelaar voor dag- en nachtmodus. Zonder eigen keuze volgt de pagina de instelling van het apparaat.
+(function () {
+  var knop = document.querySelector("[data-theme-toggle]");
+  if (!knop) return;
+  knop.addEventListener("click", function () {
+    var root = document.documentElement;
+    var huidig = root.getAttribute("data-theme") ||
+      (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    var nieuw = huidig === "dark" ? "light" : "dark";
+    root.setAttribute("data-theme", nieuw);
+    try { localStorage.setItem("thema", nieuw); } catch (e) {}
+  });
+})();

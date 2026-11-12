@@ -7,7 +7,7 @@ from html import escape as esc
 from urllib.parse import quote
 
 STATUS_CLASS = {"Kritiek": "crit", "Aanvullen": "fill", "OK": "ok", "Overstock": "over",
-                "Dood": "dead", "Niet aanvullen": "off"}
+                "Dood": "dead", "Gepauzeerd": "off", "End of life": "eol"}
 SIGNAL_ICON = {"up": "▲", "down": "▼", "warn": "!", "info": "i", "note": "✎"}
 
 
@@ -131,6 +131,7 @@ ICONS = {
     "alert": '<path d="M12 4l9 16H3L12 4z"/><path d="M12 10v4M12 17v.5"/>',
     "moon": '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
     "stack": '<path d="M12 4l8 4-8 4-8-4 8-4z"/><path d="M4 12l8 4 8-4M4 16l8 4 8-4"/>',
+    "sun": '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>',
     "refresh": '<path d="M20 11a8 8 0 0 0-14.5-4M4 4v3.5h3.5M4 13a8 8 0 0 0 14.5 4M20 20v-3.5h-3.5"/>',
 }
 
@@ -175,7 +176,7 @@ def layout(title, body, user=None, channels=(), current=None, active="", flash=N
                 fresh = '<span class="fresh">%sBijgewerkt %s</span>' % (icon("refresh"), esc(last[11:16] if last[:10] == info.get("_today") else nl_date(last)[:-5] + " " + last[11:16]))
         initials = "".join(w[:1] for w in re.split(r"[^A-Za-z0-9]+", user["username"]) if w)[:2].upper() or "?"
         nav = ('<header class="top"><a class="brand" href="/%s"><span class="mark">%s</span><span class="bname"><b>Dexxon</b> Replenishment</span></a><nav>%s</nav>'
-               '<div class="who">%s<a class="avatar" href="/account" title="Mijn account: %s" aria-label="Mijn account: %s">%s</a>'
+               '<div class="who">%s<button type="button" class="theme" data-theme-toggle title="Wissel tussen dag- en nachtmodus" aria-label="Wissel tussen dag- en nachtmodus">' + icon("moon").replace('class="ic"', 'class="ic moon"') + icon("sun").replace('class="ic"', 'class="ic sun"') + '</button><a class="avatar" href="/account" title="Mijn account: %s" aria-label="Mijn account: %s">%s</a>'
                '<form method="post" action="/uitloggen"><input type="hidden" name="csrf" value="%s"><button class="link">Uitloggen</button></form></div></header>%s') % (
             q, icon("box"), links, fresh, esc(user["username"]), esc(user["username"]), esc(initials), esc(user["csrf"]), cards)
     note = ""
@@ -183,7 +184,7 @@ def layout(title, body, user=None, channels=(), current=None, active="", flash=N
         note = '<div class="flash %s" role="status">%s</div>' % (esc(flash[0]), esc(flash[1]))
     return ('<!doctype html><html lang="nl"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1">'
-            '<title>%s · Dexxon Replenishment</title><link rel="stylesheet" href="/static/style.css?v=%s">'
+            '<title>%s · Dexxon Replenishment</title><script src="/static/theme.js"></script><link rel="stylesheet" href="/static/style.css?v=%s">'
             '</head><body>%s<main>%s%s</main><script src="/static/app.js?v=%s" defer></script></body></html>') % (
         esc(title), static_version(), nav, note, body, static_version())
 
@@ -234,12 +235,13 @@ def shipment_list(ch, rows):
         '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td class="num">%d</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td></tr>' % (
             ship_link(s, code), nl_date(s["created"]), esc(STATE_LABEL.get(s["state"], s["state"])), _transport(s)[0] or "–",
             s["n_lines"], nl(s["announced"]), nl(s["received"]), nl(s["booked"]),
-            ('<span class="missing">%+d</span>' % (s["booked"] - s["announced"])) if s["state"] == "DONE" and s["booked"] != s["announced"] else "–")
+            ('<span class="missing">%+d</span>' % (s["booked"] - s["announced"])) if s["state"] == "DONE" and s["booked"] != s["announced"]
+            else ('<span class="complete">compleet</span>' if s["state"] == "DONE" else '<span class="muted">loopt nog</span>'))
         for s in rows)
     return ('<p><a href="/?kanaal=%s">← Terug naar Aanvullen</a></p><h1>Zendingen</h1>'
             '<p class="muted">Alle zendingen naar %s die de tool kent, nieuwste eerst. Klik op een zending voor de details.</p>'
             '<div class="scroll"><table class="grid"><thead><tr><th>Zending</th><th>Aangemeld</th><th>Status</th><th>Vervoer</th><th class="num">Artikelen</th>'
-            '<th class="num">Aangemeld (st)</th><th class="num">Ontvangen</th><th class="num">Opgeboekt</th><th class="num">Verschil</th></tr></thead>'
+            '<th class="num">Aangemeld (st)</th><th class="num">Ontvangen</th><th class="num">Opgeboekt</th><th class="num">Compleet?</th></tr></thead>'
             '<tbody>%s</tbody></table></div>') % (quote(code), esc(ch["name"]), trs)
 
 
@@ -259,8 +261,18 @@ def shipment_detail(ch, ship, lines, devs):
              ("Vervoer", how or "–"), ("Track en trace", track or ('<span class="muted">nog niet beschikbaar</span>' if ship["carrier"] and ship["state"] in ("ANNOUNCED", "IN_TRANSIT") else "–")),
              ("Aangemeld", "%s stuks, %d artikelen" % (nl(announced), len(lines))), ("Ontvangen", nl(received) + " stuks"),
              ("Opgeboekt", nl(booked) + " stuks")]
-    facts_html = "".join('<div><dt>%s</dt><dd>%s</dd></div>' % (esc(k), v) for k, v in facts)
     final = ship["state"] == "DONE"
+    if final and booked == announced:
+        verdict = '<div class="flash good" role="status">Compleet aangekomen: alle %s aangemelde stuks zijn opgeboekt.</div>' % nl(announced)
+    elif final:
+        verdict = '<div class="flash bad" role="alert">Niet compleet: %s aangemeld, %s opgeboekt (%+d).</div>' % (nl(announced), nl(booked), booked - announced)
+    elif received > announced:
+        verdict = '<div class="flash bad" role="alert">Er is meer ontvangen dan aangemeld: %s tegenover %s.</div>' % (nl(received), nl(announced))
+    elif ship["state"] in ("ARRIVED_AT_WH", "IN_PROGRESS_AT_WH"):
+        verdict = '<div class="flash warn">Aangekomen en nog niet afgerond: %s van %s stuks opgeboekt. Of de zending compleet is, blijkt pas als ze is afgerond.</div>' % (nl(booked), nl(announced))
+    else:
+        verdict = '<div class="flash">Nog niet aangekomen. Zodra de marketplace de ontvangst meldt, zie je hier of de zending compleet is.</div>'
+    facts_html = "".join('<div><dt>%s</dt><dd>%s</dd></div>' % (esc(k), v) for k, v in facts)
     trs = []
     for l in lines:
         b = l["regular"] + l["graded"]
@@ -290,9 +302,9 @@ def shipment_detail(ch, ship, lines, devs):
                 esc(kind.get(d["kind"], d["kind"])), esc(d["detail"] or ""), nl_date(d["first_seen"]),
                 ", afgehandeld door %s" % esc(d["handled_by"] or "") if d["handled_at"] else "")
             for d in devs)
-    return ('<p><a href="/zendingen?kanaal=%s">← Alle zendingen</a></p><h1>Zending %s</h1><p class="muted">%s</p>'
+    return ('<p><a href="/zendingen?kanaal=%s">← Alle zendingen</a></p><h1>Zending %s</h1><p class="muted">%s</p>%s'
             '<dl class="facts">%s</dl><section><h2>Artikelen in deze zending</h2>%s</section>%s') % (
-        quote(code), esc(ship["reference"] or ship["ship_id"]), esc(ch["name"]), facts_html, table, dev_html)
+        quote(code), esc(ship["reference"] or ship["ship_id"]), esc(ch["name"]), verdict, facts_html, table, dev_html)
 
 
 def shipments_section(devs, ships, code, csrf):
@@ -621,11 +633,15 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(
                 '<form method="post" action="/afvinken"><input type="hidden" name="csrf" value="%s">'
                 '<input type="hidden" name="kanaal" value="%s"><input type="hidden" name="ean" value="%s">'
                 '<input type="hidden" name="units" value="%s"><input type="hidden" name="pieces" value="%s">'
-                '<button class="button small">Aangemeld</button></form></li>' % (
+                '<button class="button small">Aangemeld</button></form>'
+                '<form method="post" action="/artikelen/actie"><input type="hidden" name="csrf" value="%s">'
+                '<input type="hidden" name="kanaal" value="%s"><input type="hidden" name="terug" value="/">'
+                '<input type="hidden" name="sel_%s" value="1"><input type="hidden" name="actie" value="pauzeren">'
+                '<button class="link small" title="Niet meer aanvullen op dit kanaal">Pauzeren</button></form></li>' % (
                     r["ean"], quote(code), esc(r["name"] or r["ean"]), thumb(r["ean"], r.get("photo")),
                     r["ean"], quote(code), esc(r["name"] or "(naam onbekend)"), esc(meta), signals_html(r),
                     pill(r["status"]), cover_cell(r, result["params"]), amount,
-                    csrf, esc(code), r["ean"], r["units"] or "", r["deliver"]))
+                    csrf, esc(code), r["ean"], r["units"] or "", r["deliver"], csrf, esc(code), r["ean"]))
         todo_html = '<ul class="rows">%s</ul>' % "".join(trs)
     else:
         todo_html = '<p class="calm">Geen artikelen onder de besteltrigger van %s dagen. Er hoeft nu niets aangemeld te worden.</p>' % result["params"]["trigger"]
@@ -665,15 +681,16 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(
         drafts_section(open_drafts, code, csrf), shipments_section(devs, ships, code, csrf), done_html, att_html)
 
 
-def articles(result, ch, status_filter, only_no_unit):
+def articles(result, ch, status_filter, only_no_unit, user=None):
     code = ch["code"]
+    admin = bool(user) and user["role"] == "beheer"
     rows = result["rows"]
     counts = {}
     for r in rows:
         counts[r["status"]] = counts.get(r["status"], 0) + 1
     chips = ['<a class="chip%s" href="/artikelen?kanaal=%s">Alle <b>%d</b></a>' % (
         "" if status_filter or only_no_unit else " on", quote(code), len(rows))]
-    for status in ["Kritiek", "Aanvullen", "OK", "Overstock", "Dood", "Niet aanvullen"]:
+    for status in ["Kritiek", "Aanvullen", "OK", "Overstock", "Dood", "Gepauzeerd", "End of life"]:
         if counts.get(status):
             chips.append('<a class="chip%s" href="/artikelen?kanaal=%s&status=%s">%s <b>%d</b></a>' % (
                 " on" if status == status_filter else "", quote(code), quote(status), esc(status), counts[status]))
@@ -685,9 +702,9 @@ def articles(result, ch, status_filter, only_no_unit):
     for r in rows:
         v28 = ' <span class="muted">/ %s</span>' % nl(r["v28"], 2) if r["v28"] is not None else ""
         trs.append(
-            '<tr data-q="%s"><td>%s</td><td>%s</td><td class="num">%s</td><td class="num">%s</td>'
+            '<tr data-q="%s"><td class="pick"><input type="checkbox" name="sel_%s" value="1" aria-label="Selecteer %s"></td><td>%s</td><td>%s</td><td class="num">%s</td><td class="num">%s</td>'
             '<td><span class="sales"><b>%s</b>%s</span></td><td class="num">%s%s</td><td>%s</td><td class="num">%s</td><td>%s</td><td>%s</td></tr>' % (
-                esc((r["name"] + " " + r["ean"] + " " + r["article_code"]).lower()),
+                esc((r["name"] + " " + r["ean"] + " " + r["article_code"]).lower()), r["ean"], esc(r["name"] or r["ean"]),
                 pill(r["status"]), product_cell(r, code), nl(r["stock"]), nl(r["inbound"]) if r["inbound"] else "–",
                 nl(r["ordered"]), spark(r["series"]), nl(r["v"], 2), v28, cover_cell(r, result["params"]),
                 nl(r["unit"]) if r["unit"] else '<span class="missing">ontbreekt</span>',
@@ -696,10 +713,19 @@ def articles(result, ch, status_filter, only_no_unit):
     return ('<div class="headrow"><div><h1>Alle artikelen</h1><p class="muted">%d artikelen · voorraadstand van %s</p></div>'
             '<input type="search" id="zoek" placeholder="Zoek op naam, EAN of artikelcode" aria-label="Zoek artikel"></div>'
             '<div class="chips">%s</div>'
-            '<div class="scroll"><table class="grid" id="tabel"><thead><tr><th>Status</th><th>Artikel</th><th class="num">Voorraad</th><th class="num">Onderweg</th>'
+            '<form method="post" action="/artikelen/actie">%s'
+            '<div class="scroll"><table class="grid" id="tabel"><thead><tr><th><span class="sr">Selecteer</span></th><th>Status</th><th>Artikel</th><th class="num">Voorraad</th><th class="num">Onderweg</th>'
             '<th>Besteld %d dgn</th><th class="num">%s</th><th>Dekking</th><th class="num">Eenheid</th><th>Advies</th><th>Signalen</th></tr></thead>'
-            '<tbody>%s</tbody></table></div><p class="muted" id="leeg" hidden>Geen artikelen gevonden.</p>') % (
-        len(rows), nl_date(result["ref_date"]), "".join(chips), result["params"]["velocity"], head28, "".join(trs))
+            '<tbody>%s</tbody></table></div></form><p class="muted" id="leeg" hidden>Geen artikelen gevonden.</p>') % (
+        len(rows), nl_date(result["ref_date"]), "".join(chips),
+        ('<div class="bulk"><input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s">'
+         '<input type="hidden" name="terug" value="/artikelen"><label class="sr" for="actie">Actie voor de aangevinkte artikelen</label>'
+         '<span class="muted">Aangevinkte artikelen:</span><select name="actie" id="actie">'
+         '<option value="pauzeren">Pauzeren op %s</option><option value="activeren">Weer activeren op %s</option>%s</select>'
+         '<button class="button">Toepassen</button></div>') % (
+            esc(user["csrf"]) if user else "", esc(code), esc(ch["name"]), esc(ch["name"]),
+            '<option value="eol">End of life (alle kanalen)</option><option value="eol-opheffen">End of life opheffen</option>' if admin else ""),
+        result["params"]["velocity"], head28, "".join(trs))
 
 
 def bars28(history):
@@ -738,17 +764,27 @@ def article(r, ch, user, history, product, params):
     if user["role"] == "beheer":
         mode = product["mode"] or "normaal"
         opts = "".join('<option value="%s"%s>%s</option>' % (v, " selected" if v == mode else "", label) for v, label in
-                       [("normaal", "Normaal aanvullen"), ("eol", "End of life: niet aanvullen"), ("uit", "Handmatig uitgezet")])
+                       [("normaal", "Normaal aanvullen"), ("eol", "End of life: op geen enkel kanaal meer aanvullen")])
         form = ('<section><h2>Artikelgegevens</h2><form method="post" action="/artikel/%s" class="edit">'
                 '<input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s">'
                 '<label>Artikelcode<input name="article_code" value="%s"></label>'
                 '<label>Besteleenheid (stuks per doos)<input name="order_unit" type="number" min="1" max="10000" value="%s" placeholder="nog niet bekend"></label>'
-                '<label>Aanvullen<select name="mode">%s</select></label>'
+                '<label>Levenscyclus<select name="mode">%s</select></label>'
                 '<label class="wide">Notitie<input name="note" value="%s" maxlength="200"></label>'
                 '<button class="primary">Opslaan</button></form>'
                 '<p class="muted">Bron besteleenheid: %s. Deze gegevens gelden voor alle kanalen.</p></section>') % (
             r["ean"], esc(user["csrf"]), esc(code), esc(product["article_code"] or ""),
             product["order_unit"] or "", opts, esc(product["note"] or ""), esc(product["unit_source"] or "onbekend"))
+    is_paused = r["mode"] == "pauze"
+    pause = ('<form method="post" action="/artikelen/actie" class="inline pausebar"><input type="hidden" name="csrf" value="%s">'
+             '<input type="hidden" name="kanaal" value="%s"><input type="hidden" name="terug" value="/artikel/%s">'
+             '<input type="hidden" name="sel_%s" value="1"><input type="hidden" name="actie" value="%s">'
+             '<button class="button">%s</button><span class="muted">%s</span></form>') % (
+        esc(user["csrf"]), esc(code), r["ean"], r["ean"], "activeren" if is_paused else "pauzeren",
+        ("Weer activeren op %s" if is_paused else "Pauzeren op %s") % esc(ch["name"]),
+        "Het artikel komt dan weer in het advies." if is_paused else "Het artikel komt dan niet meer in het advies voor dit kanaal. Andere kanalen lopen door.") \
+        if r["mode"] != "eol" else '<p class="muted">Dit artikel is end of life en wordt op geen enkel kanaal meer aangevuld.</p>'
+    form = pause + form
     return ('<p><a href="/artikelen?kanaal=%s">← Alle artikelen</a></p>'
             '<div class="headrow"><div><h1>%s</h1><p class="muted">%s%s · %s</p></div>%s</div>%s%s'
             '<dl class="facts">%s</dl><section><h2>Besteld per dag</h2>%s</section>%s') % (

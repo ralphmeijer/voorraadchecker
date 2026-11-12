@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS deviations(
   id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT, ship_id TEXT, ean TEXT, kind TEXT, detail TEXT,
   first_seen TEXT, last_seen TEXT, resolved_at TEXT, handled_at TEXT, handled_by TEXT, mailed_at TEXT,
   UNIQUE(channel, ship_id, ean, kind));
+CREATE TABLE IF NOT EXISTS paused(
+  channel TEXT, ean TEXT, username TEXT, paused_at TEXT, PRIMARY KEY(channel, ean));
 CREATE TABLE IF NOT EXISTS drafts(
   id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT, username TEXT, created_at TEXT, status TEXT,
   dest_process TEXT, error TEXT);
