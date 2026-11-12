@@ -33,6 +33,16 @@ CREATE TABLE IF NOT EXISTS return_items(
 CREATE TABLE IF NOT EXISTS inbound(
   channel TEXT, ref TEXT, ean TEXT, quantity INTEGER, state TEXT, created TEXT,
   PRIMARY KEY(channel, ref, ean));
+CREATE TABLE IF NOT EXISTS shipments(
+  channel TEXT, ship_id TEXT, reference TEXT, state TEXT, created TEXT, expected TEXT, arrived TEXT,
+  done_at TEXT, PRIMARY KEY(channel, ship_id));
+CREATE TABLE IF NOT EXISTS shipment_lines(
+  channel TEXT, ship_id TEXT, ean TEXT, announced INTEGER, received INTEGER, in_progress INTEGER,
+  regular INTEGER, graded INTEGER, PRIMARY KEY(channel, ship_id, ean));
+CREATE TABLE IF NOT EXISTS deviations(
+  id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT, ship_id TEXT, ean TEXT, kind TEXT, detail TEXT,
+  first_seen TEXT, last_seen TEXT, resolved_at TEXT, handled_at TEXT, handled_by TEXT, mailed_at TEXT,
+  UNIQUE(channel, ship_id, ean, kind));
 CREATE TABLE IF NOT EXISTS handoffs(
   id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT, ean TEXT, units INTEGER, pieces INTEGER,
   username TEXT, created_at TEXT, undone INTEGER DEFAULT 0);

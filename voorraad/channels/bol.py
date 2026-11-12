@@ -10,7 +10,7 @@ import urllib.request
 from datetime import date, timedelta
 
 from .. import config
-from .base import Channel, ChannelError, InboundLine, OrderLine, ReturnLine, StockRow
+from .base import Channel, ChannelError, OrderLine, ReturnLine, Shipment, ShipmentLine, StockRow
 
 TOKEN_URL = "https://login.bol.com/token"
 API = "https://api.bol.com/retailer"
@@ -166,26 +166,27 @@ class BolChannel(Channel):
                         quantity=qty or int(it.get("expectedQuantity") or 0))
         return list(out.values())
 
-    def fetch_inbound(self) -> list:
-        out = []
-        start = (date.today() - timedelta(days=60)).isoformat()
-        seen = set()
-        for state in OPEN_STATES:
+    def fetch_shipments(self, since: str, skip_ids=()) -> list:
+        out, seen = [], set(skip_ids)
+        for state in OPEN_STATES + ("DONE",):
             for rep in self._pages("replenishments", "/replenishments", "replenishments",
-                                   {"state": state, "start-date": start}):
+                                   {"state": state, "start-date": since}):
                 rid = str(rep.get("replenishmentId"))
                 if rid in seen:
                     continue
                 seen.add(rid)
-                detail = self._get("replenishments", "/replenishments/" + rid)
-                created = (detail.get("creationDateTime") or "")[:10]
-                for line in detail.get("lines") or []:
-                    if not line.get("ean"):
-                        continue
-                    booked = int(line.get("quantityWithRegularState") or 0) + int(line.get("quantityWithGradedState") or 0)
-                    open_qty = int(line.get("quantityAnnounced") or 0) - booked
-                    if open_qty > 0:
-                        out.append(InboundLine(ref=detail.get("reference") or rid, ean=str(line["ean"]),
-                                               quantity=open_qty, state=detail.get("state") or state,
-                                               created=created))
+                d = self._get("replenishments", "/replenishments/" + rid)
+                moments = {t.get("state"): (t.get("stateDateTime") or "")[:10] for t in d.get("stateTransitions") or []}
+                arrived = min([m for k, m in moments.items() if k in ("ARRIVED_AT_WH", "IN_PROGRESS_AT_WH") and m] or [""])
+                lines = [ShipmentLine(ean=str(l["ean"]), announced=int(l.get("quantityAnnounced") or 0),
+                                      received=int(l.get("quantityReceived") or 0),
+                                      in_progress=int(l.get("quantityInProgress") or 0),
+                                      regular=int(l.get("quantityWithRegularState") or 0),
+                                      graded=int(l.get("quantityWithGradedState") or 0))
+                         for l in d.get("lines") or [] if l.get("ean")]
+                out.append(Shipment(
+                    ship_id=rid, reference=d.get("reference") or rid, state=d.get("state") or state,
+                    created=(d.get("creationDateTime") or "")[:10],
+                    expected=(d.get("deliveryInformation") or {}).get("expectedDeliveryDate"),
+                    arrived=arrived or None, done_at=moments.get("DONE") or None, lines=lines))
         return out

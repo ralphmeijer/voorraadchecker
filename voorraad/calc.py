@@ -45,11 +45,8 @@ def compute(conn, ch):
         returns[r["ean"]] = r["n"] or 0
 
     inbound = {}
-    # Zendingen ouder dan 30 dagen tellen niet mee: wat dan nog openstaat is vrijwel altijd een
-    # telverschil bij ontvangst en komt niet meer binnen.
-    inbound_from = (refd - timedelta(days=30)).isoformat()
-    for r in conn.execute("SELECT ean, SUM(quantity) n, MAX(created) c FROM inbound WHERE channel=? AND created>=? GROUP BY ean",
-                          (code, inbound_from)):
+    # Welke zendingen nog als onderweg tellen bepaalt shipments.rebuild_inbound (op aankomstdatum).
+    for r in conn.execute("SELECT ean, SUM(quantity) n, MAX(created) c FROM inbound WHERE channel=? GROUP BY ean", (code,)):
         inbound[r["ean"]] = [r["n"] or 0, r["c"] or ""]
     # Door logistiek afgevinkte regels tellen als onderweg tot de API de zending zelf laat zien.
     horizon = (date.today() - timedelta(days=p["lead"] + p["buffer"])).isoformat()

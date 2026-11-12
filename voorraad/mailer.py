@@ -74,6 +74,11 @@ def _send(ch, result, todo) -> bool:
     msg.add_attachment(excel.build(result, ch["name"]), maintype="application",
                        subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        filename="LvB_aanvuladvies_%s.xlsx" % result["ref_date"])
+    return _deliver(msg)
+
+
+def _deliver(msg) -> bool:
+    host = config.get("SMTP_HOST")
     try:
         port = int(config.get("SMTP_PORT", "587"))
         ctx = ssl.create_default_context()
@@ -87,7 +92,38 @@ def _send(ch, result, todo) -> bool:
                 server.login(config.get("SMTP_USER"), config.get("SMTP_PASSWORD"))
             server.send_message(msg)
     except Exception as e:
-        print("Weekmail versturen mislukt: %s" % e)
+        print("Mail versturen mislukt: %s" % e)
         return False
-    print("Weekmail verstuurd naar %s" % to)
+    print("Mail verstuurd naar %s" % msg["To"])
     return True
+
+
+def send_deviations(ch, deviations) -> bool:
+    """Mail over afwijkingen bij zendingen die er een dag na de eerste melding nog staan."""
+    host, to = config.get("SMTP_HOST"), config.get("MAIL_TO")
+    if not host or not to:
+        print("Afwijkingenmail niet verstuurd: SMTP_HOST of MAIL_TO ontbreekt in config.env")
+        return False
+    base = config.get("VC_BASE_URL")
+    lines = ["Bij %s staan %d afwijkingen open die sinds gisteren of langer niet zijn opgelost." % (ch["name"], len(deviations)), ""]
+    trs = ""
+    for d in deviations:
+        what = "Aantal wijkt af" if d["kind"] == "aantal" else "Blijft hangen bij opboeken"
+        art = ("%s (%s)" % (d["title"], d["ean"])) if d["ean"] else "hele zending"
+        lines.append("- Zending %s, %s: %s. %s. Gemeld sinds %s." % (d["reference"], art, what, d["detail"], nl_date(d["first_seen"])))
+        trs += "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            esc(d["reference"] or ""), esc(art), esc(what), esc(d["detail"] or ""), nl_date(d["first_seen"]))
+    if base:
+        lines += ["", "Afhandelen kan in het dashboard: " + base]
+    html = ("<h2>Afwijkingen bij zendingen naar %s</h2><p>Deze afwijkingen staan sinds gisteren of langer open.</p>"
+            "<table cellpadding='6' border='1' style='border-collapse:collapse'><tr><th>Zending</th><th>Artikel</th>"
+            "<th>Afwijking</th><th>Toelichting</th><th>Sinds</th></tr>%s</table>") % (esc(ch["name"]), trs)
+    if base:
+        html += "<p><a href='%s'>Afhandelen in het dashboard</a></p>" % esc(base)
+    msg = EmailMessage()
+    msg["Subject"] = "Zendingen %s: %d afwijkingen open" % (ch["name"], len(deviations))
+    msg["From"] = config.get("MAIL_FROM") or config.get("SMTP_USER")
+    msg["To"] = to
+    msg.set_content("\n".join(lines))
+    msg.add_alternative(html, subtype="html")
+    return _deliver(msg)

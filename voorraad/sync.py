@@ -4,7 +4,7 @@ from __future__ import annotations
 import traceback
 from datetime import date, timedelta
 
-from . import db
+from . import db, shipments
 from .channels import ChannelError, get_adapter
 
 
@@ -18,7 +18,9 @@ def sync_channel(conn, ch, backfill_days: int = 0) -> str:
     stock = adapter.fetch_stock()
     orders = adapter.fetch_order_lines(backfill_days)
     returns = adapter.fetch_returns((today - timedelta(days=45)).isoformat())
-    inbound = adapter.fetch_inbound()
+    known_done = [r[0] for r in conn.execute(
+        "SELECT ship_id FROM shipments WHERE channel=? AND state='DONE'", (code,))]
+    ships = adapter.fetch_shipments((today - timedelta(days=shipments.HISTORY_DAYS)).isoformat(), known_done)
 
     # Alles is opgehaald; nu pas schrijven, zodat een mislukte ronde niets half achterlaat.
     for s in stock:
@@ -53,15 +55,13 @@ def sync_channel(conn, ch, backfill_days: int = 0) -> str:
         """INSERT INTO daily_returns(channel, ean, date, received, source)
            SELECT channel, ean, reg_date, SUM(quantity), 'api' FROM return_items
            WHERE channel=? AND reg_date>=? GROUP BY ean, reg_date""", (code, api_since))
-    conn.execute("DELETE FROM inbound WHERE channel=?", (code,))
-    for i in inbound:
-        conn.execute(
-            """INSERT INTO inbound(channel, ref, ean, quantity, state, created) VALUES(?,?,?,?,?,?)
-               ON CONFLICT(channel, ref, ean) DO UPDATE SET quantity=quantity+excluded.quantity""",
-            (code, i.ref, i.ean, i.quantity, i.state, i.created))
+    shipments.store(conn, code, ships)
+    n_inbound = shipments.rebuild_inbound(conn, ch, today)
+    n_dev = shipments.evaluate(conn, ch, today)
     conn.commit()
-    return "%d artikelen, %d orderregels, %d retouren, %d regels onderweg" % (
-        len(stock), len(orders), len(returns), len(inbound))
+    note = shipments.notify(conn, ch, today)
+    return "%d artikelen, %d orderregels, %d retouren, %d zendingen bijgewerkt, %d regels onderweg, %d afwijkingen%s" % (
+        len(stock), len(orders), len(returns), len(ships), n_inbound, n_dev, " (" + note + ")" if note else "")
 
 
 def run(conn, only: str = None, backfill_days: int = 0) -> bool:

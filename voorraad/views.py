@@ -138,7 +138,41 @@ def freshness(result, last_run):
     return " · ".join(bits)
 
 
-def dashboard(result, ch, user, handoffs, last_run, stale_days):
+def shipments_section(devs, ships, code, csrf):
+    """Afwijkingen bij zendingen (met afhandelknop) en de lopende zendingen."""
+    from .shipments import STATE_LABEL
+    out = ""
+    if devs:
+        trs = []
+        for d in devs:
+            what = "Aantal wijkt af" if d["kind"] == "aantal" else "Blijft hangen bij opboeken"
+            art = ('%s<span class="pmeta">%s</span>' % (esc(d["title"] or ""), esc(d["ean"]))) if d["ean"] else '<span class="muted">hele zending</span>'
+            mailed = '<span class="pmeta">mail verstuurd %s</span>' % esc(d["mailed_at"][:10]) if d["mailed_at"] else ""
+            trs.append(
+                '<tr><td><b>%s</b><span class="pmeta">aangemeld %s</span></td><td>%s</td><td><span class="pill crit">%s</span></td>'
+                '<td>%s</td><td>%s%s</td><td><form method="post" action="/afwijking/afhandelen">'
+                '<input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s">'
+                '<input type="hidden" name="id" value="%d"><button class="button small">Afgehandeld</button></form></td></tr>' % (
+                    esc(d["reference"] or d["ship_id"]), nl_date(d["created"]), art, what, esc(d["detail"] or ""),
+                    nl_date(d["first_seen"]), mailed, csrf, esc(code), d["id"]))
+        out += ('<section id="afwijkingen"><h2>Afwijkingen bij zendingen</h2><p class="muted">Verdwijnt vanzelf als bol het rechtzet, of als je op Afgehandeld klikt. '
+                'Staat een afwijking er de volgende dag nog, dan gaat er een mail uit.</p>'
+                '<div class="scroll"><table class="grid"><thead><tr><th>Zending</th><th>Artikel</th><th>Afwijking</th><th>Toelichting</th><th>Sinds</th><th></th></tr></thead>'
+                '<tbody>%s</tbody></table></div></section>') % "".join(trs)
+    if ships:
+        trs = []
+        for s in ships:
+            when = "aangekomen %s" % nl_date(s["arrived"]) if s["arrived"] else ("verwacht %s" % nl_date(s["expected"]) if s["expected"] else "")
+            trs.append('<tr><td><b>%s</b></td><td>%s</td><td>%s<span class="pmeta">%s</span></td><td class="num">%d</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td></tr>' % (
+                esc(s["reference"] or s["ship_id"]), nl_date(s["created"]), esc(STATE_LABEL.get(s["state"], s["state"])), esc(when),
+                s["n_lines"], nl(s["announced"]), nl(s["received"]), nl(s["booked"])))
+        out += ('<section><h2>Lopende zendingen</h2><div class="scroll"><table class="grid"><thead><tr><th>Zending</th><th>Aangemeld</th><th>Status</th>'
+                '<th class="num">Artikelen</th><th class="num">Aangemeld (st)</th><th class="num">Ontvangen</th><th class="num">Opgeboekt</th></tr></thead>'
+                '<tbody>%s</tbody></table></div></section>') % "".join(trs)
+    return out
+
+
+def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=()):
     code = ch["code"]
     rows = result["rows"]
     if not rows:
@@ -156,6 +190,10 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days):
         warn += '<div class="flash bad" role="alert">De laatste verversing is mislukt: %s</div>' % esc(last_run["message"] or "")
     if stale_days is not None and stale_days >= 2:
         warn += '<div class="flash bad" role="alert">De voorraadstand is %d dagen oud. Het advies kan achterlopen.</div>' % stale_days
+
+    if devs:
+        warn += '<div class="flash bad" role="alert">%d %s bij zendingen. <a href="#afwijkingen">Bekijk</a></div>' % (
+            len(devs), "afwijking" if len(devs) == 1 else "afwijkingen")
 
     tiles = (
         '<section class="tiles">'
@@ -215,8 +253,9 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days):
 
     return ('%s<div class="headrow"><div><h1>Aanvullen</h1><p class="muted">%s</p></div>'
             '<a class="button" href="/export.xlsx?kanaal=%s">Excel voor logistiek</a></div>%s%s'
-            '<section><h2>Nu aanmelden</h2>%s</section>%s%s') % (
-        warn, freshness(result, last_run), quote(code), tiles, unit_html, todo_html, done_html, att_html)
+            '<section><h2>Nu aanmelden</h2>%s</section>%s%s%s') % (
+        warn, freshness(result, last_run), quote(code), tiles, unit_html, todo_html,
+        shipments_section(devs, ships, code, csrf), done_html, att_html)
 
 
 def articles(result, ch, status_filter, only_no_unit):

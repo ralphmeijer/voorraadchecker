@@ -11,7 +11,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import auth, calc, config, db, excel, report_import, sync, views
+from . import auth, calc, config, db, excel, report_import, shipments, sync, views
 from .channels import get_adapter
 from .masterdata import norm_ean
 
@@ -182,7 +182,8 @@ class Handler(BaseHTTPRequestHandler):
                 (code, (date.today() - timedelta(days=14)).isoformat())).fetchall()
             last = conn.execute("SELECT * FROM sync_runs WHERE channel=? AND finished IS NOT NULL ORDER BY id DESC LIMIT 1", (code,)).fetchone()
             stale = (date.today() - date.fromisoformat(result["ref_date"])).days if result["ref_date"] else None
-            return self.page("Aanvullen", views.dashboard(result, ch, self.user, handoffs, last, stale), "aanvullen")
+            return self.page("Aanvullen", views.dashboard(result, ch, self.user, handoffs, last, stale,
+                                                            shipments.open_deviations(conn, code), shipments.running(conn, code)), "aanvullen")
         if path == "/artikelen":
             result = calc.compute(conn, ch)
             status = (self.q.get("status") or [""])[0]
@@ -252,6 +253,10 @@ class Handler(BaseHTTPRequestHandler):
                          (code, ean, units, pieces, user["username"]))
             conn.commit()
             return self.back("/", code, ok="Afgevinkt als aangemeld: %d stuks" % pieces)
+        if path == "/afwijking/afhandelen":
+            if (form.get("id") or "").isdigit():
+                shipments.handle(conn, code, int(form["id"]), user["username"])
+            return self.back("/", code, ok="Afwijking afgehandeld")
         if path == "/afvinken/ongedaan":
             conn.execute("UPDATE handoffs SET undone=1 WHERE id=? AND channel=?", (form.get("id"), code))
             conn.commit()

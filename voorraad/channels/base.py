@@ -8,7 +8,7 @@ Rekenmodel, database en dashboard hoeven daarvoor niet te veranderen.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -39,12 +39,29 @@ class ReturnLine:
 
 
 @dataclass
-class InboundLine:
-    ref: str              # kenmerk van de zending
+class ShipmentLine:
     ean: str
-    quantity: int         # aangemeld en nog niet op voorraad geboekt
+    announced: int
+    received: int = 0
+    in_progress: int = 0
+    regular: int = 0      # opgeboekt als verkoopbaar
+    graded: int = 0       # opgeboekt als niet (als nieuw) verkoopbaar
+
+
+@dataclass
+class Shipment:
+    """Een aanvulzending naar het magazijn van de marketplace.
+
+    state is een van: ANNOUNCED, IN_TRANSIT, ARRIVED_AT_WH, IN_PROGRESS_AT_WH, DONE, CANCELLED.
+    """
+    ship_id: str
+    reference: str
     state: str
-    created: str          # JJJJ-MM-DD
+    created: str          # JJJJ-MM-DD, datum van aanmelden
+    expected: str = None  # verwachte leverdatum
+    arrived: str = None   # datum van aankomst in het magazijn
+    done_at: str = None   # datum waarop alles is opgeboekt
+    lines: list = field(default_factory=list)
 
 
 class ChannelError(Exception):
@@ -68,5 +85,6 @@ class Channel:
     def fetch_returns(self, since: str) -> list:
         return []
 
-    def fetch_inbound(self) -> list:
+    def fetch_shipments(self, since: str, skip_ids=()) -> list:
+        """Zendingen die sinds `since` zijn aangemeld. skip_ids: al afgeronde zendingen die we al kennen."""
         return []
