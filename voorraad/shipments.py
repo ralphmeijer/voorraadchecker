@@ -10,6 +10,7 @@ Staat ze er een dag na de eerste melding nog, dan gaat er een mail uit (een keer
 """
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 
 OPEN_STATES = ("ANNOUNCED", "IN_TRANSIT", "ARRIVED_AT_WH", "IN_PROGRESS_AT_WH")
@@ -22,12 +23,16 @@ HISTORY_DAYS = 60
 def store(conn, code, shipments) -> None:
     for s in shipments:
         conn.execute(
-            """INSERT INTO shipments(channel, ship_id, reference, state, created, expected, arrived, done_at)
-               VALUES(?,?,?,?,?,?,?,?)
+            """INSERT INTO shipments(channel, ship_id, reference, state, created, expected, arrived, done_at,
+                                     carrier, tracking, boxes, window_start)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
                ON CONFLICT(channel, ship_id) DO UPDATE SET reference=excluded.reference, state=excluded.state,
                  expected=excluded.expected, arrived=COALESCE(shipments.arrived, excluded.arrived),
-                 done_at=COALESCE(shipments.done_at, excluded.done_at)""",
-            (code, s.ship_id, s.reference, s.state, s.created, s.expected, s.arrived, s.done_at))
+                 done_at=COALESCE(shipments.done_at, excluded.done_at),
+                 carrier=COALESCE(excluded.carrier, shipments.carrier), tracking=COALESCE(excluded.tracking, shipments.tracking),
+                 boxes=COALESCE(excluded.boxes, shipments.boxes), window_start=COALESCE(excluded.window_start, shipments.window_start)""",
+            (code, s.ship_id, s.reference, s.state, s.created, s.expected, s.arrived, s.done_at,
+             s.carrier, json.dumps(s.tracking) if s.tracking else None, s.boxes, s.window_start))
         conn.execute("DELETE FROM shipment_lines WHERE channel=? AND ship_id=?", (code, s.ship_id))
         for l in s.lines:
             conn.execute(

@@ -277,5 +277,7 @@ class BolChannel(Channel):
                     ship_id=rid, reference=d.get("reference") or rid, state=d.get("state") or state,
                     created=(d.get("creationDateTime") or "")[:10],
                     expected=(d.get("deliveryInformation") or {}).get("expectedDeliveryDate"),
-                    arrived=arrived or None, done_at=moments.get("DONE") or None, lines=lines))
+                    arrived=arrived or None, done_at=moments.get("DONE") or None, lines=lines,
+                    carrier=(d.get("deliveryInformation") or {}).get("transporterCode"),
+                    boxes=d.get("numberOfLoadCarriers")))
         return out

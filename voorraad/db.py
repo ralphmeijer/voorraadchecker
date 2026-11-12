@@ -82,6 +82,12 @@ def connect() -> sqlite3.Connection:
 
 def init(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    # Kolommen die later zijn toegevoegd (bestaande databases krijgen ze er hier bij).
+    for column in ("carrier TEXT", "tracking TEXT", "boxes INTEGER", "window_start TEXT"):
+        try:
+            conn.execute("ALTER TABLE shipments ADD COLUMN " + column)
+        except sqlite3.OperationalError:
+            pass
     # Het eerste kanaal. Nieuwe marketplaces komen hier als extra rij bij.
     conn.execute(
         "INSERT OR IGNORE INTO channels(code, name, adapter) VALUES('bol', 'Bol.com LvB', 'bol')")

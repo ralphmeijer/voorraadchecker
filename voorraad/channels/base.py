@@ -62,6 +62,10 @@ class Shipment:
     expected: str = None  # verwachte leverdatum
     arrived: str = None   # datum van aankomst in het magazijn
     done_at: str = None   # datum waarop alles is opgeboekt
+    carrier: str = None   # vervoerder, bijvoorbeeld UPS of DHL
+    tracking: list = None     # track-en-trace-nummers, zodra de marketplace ze doorgeeft
+    boxes: int = None     # aantal dozen of laadeenheden
+    window_start: str = None  # begin van het levervenster (expected is het einde)
     lines: list = field(default_factory=list)
 
 

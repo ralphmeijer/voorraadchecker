@@ -251,4 +251,42 @@ class AmazonChannel(Channel):
                 ship_id=sid, reference=sid + (" naar " + centre if centre else ""), state=state, created=created,
                 arrived=today if state in ("ARRIVED_AT_WH", "IN_PROGRESS_AT_WH", "DONE") else None,
                 done_at=today if state == "DONE" else None, lines=list(lines.values())))
+        try:
+            self._add_transport([s for s in out if s.state not in ("DONE", "CANCELLED")])
+        except ChannelError as e:  # vervoersgegevens zijn aanvulling: de zendingen zelf blijven geldig
+            print("Amazon: vervoersgegevens niet opgehaald (%s)" % e)
         return out
+
+    def _add_transport(self, open_shipments: list) -> None:
+        """Vult vervoerder, dozen, levervenster en track-en-trace aan vanuit de inbound-API van 2024."""
+        wanted = {s.ship_id: s for s in open_shipments}
+        if not wanted:
+            return
+        base = "/inbound/fba/2024-03-20/inboundPlans"
+        plans = self._get("shipments", base, {"pageSize": 30, "sortBy": "CREATION_TIME", "sortOrder": "DESC"}).get("inboundPlans") or []
+        for plan in plans:
+            if not wanted:
+                break
+            pid = plan.get("inboundPlanId")
+            for ref in self._get("shipments", "%s/%s" % (base, pid)).get("shipments") or []:
+                d = self._get("shipments", "%s/%s/shipments/%s" % (base, pid, ref.get("shipmentId")))
+                target = wanted.pop(d.get("shipmentConfirmationId"), None)
+                if not target:
+                    continue
+                window = d.get("selectedDeliveryWindow") or {}
+                target.window_start = (window.get("startDate") or "")[:10] or None
+                target.expected = (window.get("endDate") or "")[:10] or None
+                track = d.get("trackingDetails") or {}
+                numbers = [str(i.get("trackingId")) for i in (track.get("spdTrackingDetail") or {}).get("spdTrackingItems") or [] if i.get("trackingId")]
+                ltl = track.get("ltlTrackingDetail") or {}
+                numbers += [str(n) for n in ltl.get("freightBillNumber") or []]
+                if ltl.get("billOfLadingNumber"):
+                    numbers.append(str(ltl["billOfLadingNumber"]))
+                target.tracking = sorted(set(numbers)) or None
+                options = self._get("shipments", "%s/%s/transportationOptions" % (base, pid),
+                                    {"shipmentId": d.get("shipmentId"), "pageSize": 20}).get("transportationOptions") or []
+                chosen = [o for o in options if o.get("transportationOptionId") == d.get("selectedTransportationOptionId")] or options[:1]
+                if chosen:
+                    target.carrier = (chosen[0].get("carrier") or {}).get("name")
+                boxes = self._get("shipments", "%s/%s/shipments/%s/boxes" % (base, pid, d.get("shipmentId")), {"pageSize": 100}).get("boxes") or []
+                target.boxes = sum(int(b.get("quantity") or 1) for b in boxes) or None
