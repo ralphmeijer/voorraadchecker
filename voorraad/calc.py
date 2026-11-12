@@ -94,6 +94,8 @@ def compute(conn, ch):
 
         if mode != "normaal":
             status = "Niet aanvullen"
+        elif ordered == 0 and stock == 0 and onderweg > 0:
+            status = "OK"  # nieuw artikel: nog niets te verkopen, de eerste voorraad komt eraan
         elif ordered == 0:
             status = "Dood"
         elif cover < p["reorder_point"]:
@@ -110,6 +112,8 @@ def compute(conn, ch):
             signals.append(("warn", "Besteleenheid ontbreekt"))
         if status in ("Kritiek", "Aanvullen") and need == 0 and onderweg:
             signals.append(("info", "Onderweg dekt de behoefte"))
+        if ordered == 0 and stock == 0 and onderweg > 0:
+            signals.append(("info", "Nog geen voorraad: eerste zending is onderweg"))
         if status == "Dood" and stock == 0:
             signals.append(("warn", "Geen voorraad: mogelijk uitverkocht in plaats van dood"))
         first_half, last_half = sum(series[:half]), sum(series[-half:])

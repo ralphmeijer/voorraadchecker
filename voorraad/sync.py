@@ -8,6 +8,27 @@ from . import db, photos, shipments
 from .channels import ChannelError, get_adapter
 
 
+def _adopt(conn, key: str, sku: str) -> None:
+    """Artikel met een interne sleutel (geen EAN bekend): zet de SKU als artikelcode en neem
+    besteleenheid, merk en foto over van het masterdata-artikel met dezelfde artikelcode."""
+    p = conn.execute("SELECT article_code, order_unit, unit_source FROM products WHERE ean=?", (key,)).fetchone()
+    if not p["article_code"]:
+        conn.execute("UPDATE products SET article_code=? WHERE ean=?", (sku, key))
+    base = conn.execute(
+        "SELECT ean, order_unit, brand FROM products WHERE ean NOT LIKE '29%' AND article_code IN (?, ?) LIMIT 1",
+        (sku, sku[:-4] if sku.upper().endswith("-AMZ") else sku)).fetchone()
+    if not base:
+        return
+    if p["order_unit"] is None and p["unit_source"] is None and base["order_unit"]:
+        conn.execute("UPDATE products SET order_unit=?, unit_source=?, brand=COALESCE(brand, ?) WHERE ean=?",
+                     (base["order_unit"], "overgenomen van EAN %s" % base["ean"], base["brand"], key))
+    if photos.path(base["ean"]).is_file() and not photos.path(key).is_file():
+        import shutil
+        shutil.copyfile(str(photos.path(base["ean"])), str(photos.path(key)))
+        shutil.copyfile(str(photos.path(base["ean"], small=True)), str(photos.path(key, small=True)))
+        conn.execute("INSERT OR REPLACE INTO photos(ean, ok, checked_at) VALUES(?,1,date('now'))", (key,))
+
+
 def sync_channel(conn, ch, backfill_days: int = 0) -> str:
     code = ch["code"]
     adapter = get_adapter(ch)
@@ -16,6 +37,9 @@ def sync_channel(conn, ch, backfill_days: int = 0) -> str:
     today = date.today()
 
     stock = adapter.fetch_stock()
+    first_run = not conn.execute("SELECT 1 FROM stock WHERE channel=? LIMIT 1", (code,)).fetchone()
+    if first_run and not backfill_days and getattr(adapter, "adapter", "") != "bol":
+        backfill_days = 30  # deze koppelingen kunnen bestellingen over een datumbereik opvragen
     orders = adapter.fetch_order_lines(backfill_days)
     returns = adapter.fetch_returns((today - timedelta(days=45)).isoformat())
     known_done = [r[0] for r in conn.execute(
@@ -25,6 +49,8 @@ def sync_channel(conn, ch, backfill_days: int = 0) -> str:
     # Alles is opgehaald; nu pas schrijven, zodat een mislukte ronde niets half achterlaat.
     for s in stock:
         db.ensure_product(conn, s.ean, s.title)
+        if s.ean.startswith("29") and s.sku:
+            _adopt(conn, s.ean, s.sku)
         conn.execute("INSERT OR REPLACE INTO listings(channel, ean, sku, title) VALUES(?,?,?,?)",
                      (code, s.ean, s.sku, s.title))
         conn.execute(
@@ -56,7 +82,17 @@ def sync_channel(conn, ch, backfill_days: int = 0) -> str:
            SELECT channel, ean, reg_date, SUM(quantity), 'api' FROM return_items
            WHERE channel=? AND reg_date>=? GROUP BY ean, reg_date""", (code, api_since))
     shipments.store(conn, code, ships)
-    n_inbound = shipments.rebuild_inbound(conn, ch, today)
+    if any(s.inbound is not None for s in stock):
+        # De marketplace meldt zelf wat onderweg is: dat is betrouwbaarder dan afleiden uit de zendingen.
+        conn.execute("DELETE FROM inbound WHERE channel=?", (code,))
+        n_inbound = 0
+        for s in stock:
+            if s.inbound:
+                conn.execute("INSERT OR REPLACE INTO inbound(channel, ref, ean, quantity, state, created) VALUES(?,?,?,?,?,?)",
+                             (code, "voorraadopgave", s.ean, s.inbound, "INBOUND", today.isoformat()))
+                n_inbound += 1
+    else:
+        n_inbound = shipments.rebuild_inbound(conn, ch, today)
     n_dev = shipments.evaluate(conn, ch, today)
     conn.commit()
     note = shipments.notify(conn, ch, today)

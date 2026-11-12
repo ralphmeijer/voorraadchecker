@@ -18,6 +18,7 @@ class StockRow:
     graded: int = 0       # niet (als nieuw) verkoopbaar
     sku: str = ""
     title: str = ""
+    inbound: int = None   # onderweg volgens de marketplace zelf; None = afleiden uit de zendingen
 
 
 @dataclass

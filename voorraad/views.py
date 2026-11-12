@@ -81,11 +81,18 @@ def thumb(ean, has_photo):
     return '<span class="thumb none" aria-hidden="true"></span>'
 
 
+def ident(ean, article_code):
+    """Tekst onder de artikelnaam: EAN en artikelcode, of alleen de SKU als er geen EAN bekend is."""
+    if str(ean).startswith("29"):
+        return "SKU %s" % esc(article_code) if article_code else "geen EAN bekend"
+    return esc(ean) + (" · " + esc(article_code) if article_code else "")
+
+
 def product_cell(r, code):
     return ('<a class="prod" href="/artikel/%s?kanaal=%s">%s<span class="ptext"><span class="pname">%s</span>'
             '<span class="pmeta">%s%s</span></span></a>') % (
-        r["ean"], quote(code), thumb(r["ean"], r.get("photo")), esc(r["name"] or "(naam onbekend)"), esc(r["ean"]),
-        " · " + esc(r["article_code"]) if r["article_code"] else "")
+        r["ean"], quote(code), thumb(r["ean"], r.get("photo")), esc(r["name"] or "(naam onbekend)"),
+        ident(r["ean"], r["article_code"]), "")
 
 
 def deliver_cell(r):
@@ -176,7 +183,7 @@ def shipments_section(devs, ships, code, csrf):
         for d in devs:
             what = "Aantal wijkt af" if d["kind"] == "aantal" else "Blijft hangen bij opboeken"
             art = ('<span class="prod">%s<span class="ptext">%s<span class="pmeta">%s</span></span></span>' % (
-                thumb(d["ean"], d["photo"]), esc(d["title"] or ""), esc(d["ean"]))) if d["ean"] else '<span class="muted">hele zending</span>'
+                thumb(d["ean"], d["photo"]), esc(d["title"] or ""), "" if d["ean"].startswith("29") else esc(d["ean"]))) if d["ean"] else '<span class="muted">hele zending</span>'
             mailed = '<span class="pmeta">mail verstuurd %s</span>' % esc(d["mailed_at"][:10]) if d["mailed_at"] else ""
             trs.append(
                 '<tr><td><b>%s</b><span class="pmeta">aangemeld %s</span></td><td>%s</td><td><span class="pill crit">%s</span></td>'
@@ -185,7 +192,7 @@ def shipments_section(devs, ships, code, csrf):
                 '<input type="hidden" name="id" value="%d"><button class="button small">Afgehandeld</button></form></td></tr>' % (
                     esc(d["reference"] or d["ship_id"]), nl_date(d["created"]), art, what, esc(d["detail"] or ""),
                     nl_date(d["first_seen"]), mailed, csrf, esc(code), d["id"]))
-        out += ('<section id="afwijkingen"><h2>Afwijkingen bij zendingen</h2><p class="muted">Verdwijnt vanzelf als bol het rechtzet, of als je op Afgehandeld klikt. '
+        out += ('<section id="afwijkingen"><h2>Afwijkingen bij zendingen</h2><p class="muted">Verdwijnt vanzelf als de marketplace het rechtzet, of als je op Afgehandeld klikt. '
                 'Staat een afwijking er de volgende dag nog, dan gaat er een mail uit.</p>'
                 '<div class="scroll"><table class="grid"><thead><tr><th>Zending</th><th>Artikel</th><th>Afwijking</th><th>Toelichting</th><th>Sinds</th><th></th></tr></thead>'
                 '<tbody>%s</tbody></table></div></section>') % "".join(trs)
@@ -491,7 +498,7 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(
                 '<button class="link">Ongedaan maken</button></form></td></tr>' % (
                     esc(h["created_at"][:16]), esc(h["title"] or ""), esc(h["ean"]), nl(h["pieces"]),
                     esc(h["username"] or ""), csrf, esc(code), h["id"]))
-        done_html = ('<section><h2>Recent aangemeld</h2><p class="muted">Telt mee als onderweg tot bol de zending zelf doorgeeft.</p>'
+        done_html = ('<section><h2>Recent aangemeld</h2><p class="muted">Telt mee als onderweg tot de marketplace de zending zelf doorgeeft.</p>'
                      '<div class="scroll"><table class="grid"><thead><tr><th>Wanneer</th><th>Artikel</th><th class="num">Aantal</th><th>Door</th><th></th></tr></thead>'
                      '<tbody>%s</tbody></table></div></section>') % "".join(items)
 
@@ -600,10 +607,10 @@ def article(r, ch, user, history, product, params):
             r["ean"], esc(user["csrf"]), esc(code), esc(product["article_code"] or ""),
             product["order_unit"] or "", opts, esc(product["note"] or ""), esc(product["unit_source"] or "onbekend"))
     return ('<p><a href="/artikelen?kanaal=%s">← Alle artikelen</a></p>'
-            '<div class="headrow"><div><h1>%s</h1><p class="muted">EAN %s%s · %s</p></div>%s</div>%s%s'
+            '<div class="headrow"><div><h1>%s</h1><p class="muted">%s%s · %s</p></div>%s</div>%s%s'
             '<dl class="facts">%s</dl><section><h2>Besteld per dag</h2>%s</section>%s') % (
-        quote(code), esc(r["name"] or r["ean"]), esc(r["ean"]),
-        " · " + esc(r["article_code"]) if r["article_code"] else "", esc(ch["name"]),
+        quote(code), esc(r["name"] or r["ean"]), ("" if r["ean"].startswith("29") else "EAN ") + ident(r["ean"], r["article_code"]),
+        "", esc(ch["name"]),
         pill(r["status"]), signals_html(r),
         '<img class="photo" src="/foto/%s.jpg" alt="Foto van %s" width="220" height="220">' % (esc(r["ean"]), esc(r["name"] or r["ean"])) if r.get("photo") else "",
         facts_html, bars28(history), form)

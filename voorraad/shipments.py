@@ -25,7 +25,8 @@ def store(conn, code, shipments) -> None:
             """INSERT INTO shipments(channel, ship_id, reference, state, created, expected, arrived, done_at)
                VALUES(?,?,?,?,?,?,?,?)
                ON CONFLICT(channel, ship_id) DO UPDATE SET reference=excluded.reference, state=excluded.state,
-                 expected=excluded.expected, arrived=excluded.arrived, done_at=excluded.done_at""",
+                 expected=excluded.expected, arrived=COALESCE(shipments.arrived, excluded.arrived),
+                 done_at=COALESCE(shipments.done_at, excluded.done_at)""",
             (code, s.ship_id, s.reference, s.state, s.created, s.expected, s.arrived, s.done_at))
         conn.execute("DELETE FROM shipment_lines WHERE channel=? AND ship_id=?", (code, s.ship_id))
         for l in s.lines:
