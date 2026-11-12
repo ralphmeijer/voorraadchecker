@@ -60,6 +60,8 @@ def compute(conn, ch):
 
     days_v = [(refd - timedelta(days=i)).isoformat() for i in range(V, 0, -1)]  # oud -> nieuw
     half = V // 2
+    from .photos import available
+    with_photo = available(conn)
     rows = []
     q = """SELECT s.ean, s.stock, s.graded, s.unsellable_14d, l.title, p.article_code, p.name, p.brand,
                   p.order_unit, p.mode, p.note
@@ -135,6 +137,7 @@ def compute(conn, ch):
             "ordered": ordered, "ordered28": ordered28, "v": v, "v28": v28, "cover": cover,
             "arrival_stock": stock - p["lead"] * v, "inbound": onderweg, "need": need,
             "units": units, "deliver": deliver, "status": status, "signals": signals,
+            "photo": ean in with_photo,
             "series": series, "returns": ret, "unsellable": unsellable, "trend": trend,
         })
     rows.sort(key=lambda r: (STATUS_ORDER.index(r["status"]),

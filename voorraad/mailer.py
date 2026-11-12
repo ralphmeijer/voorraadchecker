@@ -7,7 +7,7 @@ import ssl
 from email.message import EmailMessage
 from html import escape as esc
 
-from . import calc, config, db, excel
+from . import calc, config, db, excel, photos
 from .views import nl, nl_date
 
 
@@ -53,12 +53,17 @@ def _send(ch, result, todo) -> bool:
     if base:
         lines += ["", "Dashboard: " + base]
 
-    trs = "".join("<tr><td>%s</td><td>%s<br><small>%s %s</small></td><td align='right'>%s</td><td align='right'>%s</td></tr>" % (
-        esc(r["status"]), esc(r["name"]), esc(r["ean"]), esc(r["article_code"]),
+    # Miniaturen gaan als ingesloten afbeelding mee: het dashboard zit achter een login.
+    pics = {r["ean"]: photos.path(r["ean"], small=True) for r in todo if r.get("photo")}
+    pics = {ean: f for ean, f in pics.items() if f.is_file()}
+    trs = "".join("<tr><td>%s</td><td>%s</td><td>%s<br><small>%s %s</small></td><td align='right'>%s</td><td align='right'>%s</td></tr>" % (
+        esc(r["status"]),
+        "<img src='cid:%s@voorraadchecker' width='56' height='45' alt=''>" % r["ean"] if r["ean"] in pics else "",
+        esc(r["name"]), esc(r["ean"]), esc(r["article_code"]),
         ("%s &times; %s = <b>%s</b>" % (r["units"], r["unit"], r["deliver"])) if r["units"] else "<b>%s</b> (eenheid ontbreekt)" % r["need"],
         nl(r["cover"], 0)) for r in todo)
     html = "<h2>Weekadvies %s</h2><p>Voorraadstand van %s.</p>" % (esc(ch["name"]), nl_date(result["ref_date"]))
-    html += ("<table cellpadding='6' border='1' style='border-collapse:collapse'><tr><th>Prioriteit</th><th>Artikel</th><th>Aanleveren (st)</th><th>Dekking (dgn)</th></tr>%s</table>" % trs
+    html += ("<table cellpadding='6' border='1' style='border-collapse:collapse'><tr><th>Prioriteit</th><th></th><th>Artikel</th><th>Aanleveren (st)</th><th>Dekking (dgn)</th></tr>%s</table>" % trs
              ) if todo else "<p>Er hoeft deze week niets aangemeld te worden.</p>"
     if signals:
         html += "<h3>Signalen</h3><ul>%s</ul>" % "".join("<li>%s: %s</li>" % (esc(r["name"]), esc(s[1])) for r, s in signals[:25])
@@ -71,6 +76,9 @@ def _send(ch, result, todo) -> bool:
     msg["To"] = to
     msg.set_content("\n".join(lines))
     msg.add_alternative(html, subtype="html")
+    html_part = msg.get_payload()[-1]
+    for ean, f in pics.items():
+        html_part.add_related(f.read_bytes(), "image", "jpeg", cid="<%s@voorraadchecker>" % ean)
     msg.add_attachment(excel.build(result, ch["name"]), maintype="application",
                        subtype="vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                        filename="LvB_aanvuladvies_%s.xlsx" % result["ref_date"])

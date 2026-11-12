@@ -4,7 +4,7 @@ from __future__ import annotations
 import traceback
 from datetime import date, timedelta
 
-from . import db, shipments
+from . import db, photos, shipments
 from .channels import ChannelError, get_adapter
 
 
@@ -60,6 +60,10 @@ def sync_channel(conn, ch, backfill_days: int = 0) -> str:
     n_dev = shipments.evaluate(conn, ch, today)
     conn.commit()
     note = shipments.notify(conn, ch, today)
+    try:
+        photos.update(conn, ch, adapter)
+    except Exception as e:  # foto's zijn bijzaak: een fout hier mag de ophaalronde niet laten mislukken
+        print("Foto's ophalen mislukt: %s" % e)
     return "%d artikelen, %d orderregels, %d retouren, %d zendingen bijgewerkt, %d regels onderweg, %d afwijkingen%s" % (
         len(stock), len(orders), len(returns), len(ships), n_inbound, n_dev, " (" + note + ")" if note else "")
 

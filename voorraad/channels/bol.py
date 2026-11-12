@@ -166,6 +166,18 @@ class BolChannel(Channel):
                         quantity=qty or int(it.get("expectedQuantity") or 0))
         return list(out.values())
 
+    def fetch_photo_urls(self, ean: str) -> dict:
+        """Hoofdfoto van een artikel: {'small': url, 'medium': url}."""
+        data = self._get("products", "/products/%s/assets" % ean, {"usage": "PRIMARY"})
+        out = {}
+        for asset in data.get("assets") or []:
+            for v in asset.get("variants") or []:
+                if v.get("mimeType") == "image/jpeg" and v.get("size") and v.get("url"):
+                    out.setdefault(v["size"], v["url"])
+            if out:
+                break
+        return out
+
     def fetch_shipments(self, since: str, skip_ids=()) -> list:
         out, seen = [], set(skip_ids)
         for state in OPEN_STATES + ("DONE",):

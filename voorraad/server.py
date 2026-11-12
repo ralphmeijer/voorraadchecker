@@ -5,13 +5,14 @@ import email
 import email.policy
 import io
 import mimetypes
+import re
 import threading
 from datetime import date, timedelta
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import auth, calc, config, db, excel, report_import, shipments, sync, views
+from . import auth, calc, config, db, excel, photos, report_import, shipments, sync, views
 from .channels import get_adapter
 from .masterdata import norm_ean
 
@@ -50,7 +51,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Frame-Options", "DENY")
         self.send_header("Referrer-Policy", "same-origin")
         self.send_header("Content-Security-Policy", "default-src 'self'; frame-ancestors 'none'; form-action 'self'")
-        if not ctype.startswith("text/css") and not ctype.startswith("text/javascript"):
+        if not ctype.startswith(("text/css", "text/javascript", "image/")):
             self.send_header("Cache-Control", "no-store")
         for k, v in (headers or []):
             self.send_header(k, v)
@@ -171,6 +172,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.redirect("/")
         if path == "/account":
             return self.page("Mijn account", views.account(self.user))
+        if path.startswith("/foto/"):
+            m = re.fullmatch(r"/foto/(\d{13})(-s)?\.jpg", path)
+            target = photos.path(m.group(1), bool(m.group(2))) if m else None
+            if not target or not target.is_file():
+                return self.send(404, "Niet gevonden", "text/plain; charset=utf-8")
+            return self.send(200, target.read_bytes(), "image/jpeg", [("Cache-Control", "private, max-age=86400")])
         if ch is None:
             return self.page("Voorraadchecker", "<h1>Er is nog geen kanaal ingesteld</h1>")
         code = ch["code"]

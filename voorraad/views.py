@@ -74,10 +74,17 @@ def signals_html(r):
         for kind, text in r["signals"])
 
 
+def thumb(ean, has_photo):
+    """Miniatuur van het artikel, of een leeg vakje zodat de rijen gelijk blijven."""
+    if has_photo:
+        return '<img class="thumb" src="/foto/%s-s.jpg" alt="" width="44" height="44" loading="lazy">' % esc(ean)
+    return '<span class="thumb none" aria-hidden="true"></span>'
+
+
 def product_cell(r, code):
-    return ('<a class="prod" href="/artikel/%s?kanaal=%s"><span class="pname">%s</span>'
-            '<span class="pmeta">%s%s</span></a>') % (
-        r["ean"], quote(code), esc(r["name"] or "(naam onbekend)"), esc(r["ean"]),
+    return ('<a class="prod" href="/artikel/%s?kanaal=%s">%s<span class="ptext"><span class="pname">%s</span>'
+            '<span class="pmeta">%s%s</span></span></a>') % (
+        r["ean"], quote(code), thumb(r["ean"], r.get("photo")), esc(r["name"] or "(naam onbekend)"), esc(r["ean"]),
         " · " + esc(r["article_code"]) if r["article_code"] else "")
 
 
@@ -156,7 +163,8 @@ def shipments_section(devs, ships, code, csrf):
         trs = []
         for d in devs:
             what = "Aantal wijkt af" if d["kind"] == "aantal" else "Blijft hangen bij opboeken"
-            art = ('%s<span class="pmeta">%s</span>' % (esc(d["title"] or ""), esc(d["ean"]))) if d["ean"] else '<span class="muted">hele zending</span>'
+            art = ('<span class="prod">%s<span class="ptext">%s<span class="pmeta">%s</span></span></span>' % (
+                thumb(d["ean"], d["photo"]), esc(d["title"] or ""), esc(d["ean"]))) if d["ean"] else '<span class="muted">hele zending</span>'
             mailed = '<span class="pmeta">mail verstuurd %s</span>' % esc(d["mailed_at"][:10]) if d["mailed_at"] else ""
             trs.append(
                 '<tr><td><b>%s</b><span class="pmeta">aangemeld %s</span></td><td>%s</td><td><span class="pill crit">%s</span></td>'
@@ -354,11 +362,13 @@ def article(r, ch, user, history, product, params):
             r["ean"], esc(user["csrf"]), esc(code), esc(product["article_code"] or ""),
             product["order_unit"] or "", opts, esc(product["note"] or ""), esc(product["unit_source"] or "onbekend"))
     return ('<p><a href="/artikelen?kanaal=%s">← Alle artikelen</a></p>'
-            '<div class="headrow"><div><h1>%s</h1><p class="muted">EAN %s%s · %s</p></div>%s</div>%s'
+            '<div class="headrow"><div><h1>%s</h1><p class="muted">EAN %s%s · %s</p></div>%s</div>%s%s'
             '<dl class="facts">%s</dl><section><h2>Besteld per dag</h2>%s</section>%s') % (
         quote(code), esc(r["name"] or r["ean"]), esc(r["ean"]),
         " · " + esc(r["article_code"]) if r["article_code"] else "", esc(ch["name"]),
-        pill(r["status"]), signals_html(r), facts_html, bars28(history), form)
+        pill(r["status"]), signals_html(r),
+        '<img class="photo" src="/foto/%s.jpg" alt="Foto van %s" width="220" height="220">' % (esc(r["ean"]), esc(r["name"] or r["ean"])) if r.get("photo") else "",
+        facts_html, bars28(history), form)
 
 
 def settings(ch, user, runs, users, api_ready, mail_ready):

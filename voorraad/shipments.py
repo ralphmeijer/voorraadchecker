@@ -105,8 +105,10 @@ def evaluate(conn, ch, today: date) -> int:
 
 def open_deviations(conn, code):
     return conn.execute(
-        """SELECT d.*, s.reference, s.state, s.created, COALESCE(l.title, p.name, '') AS title
+        """SELECT d.*, s.reference, s.state, s.created, COALESCE(l.title, p.name, '') AS title,
+                  COALESCE(f.ok, 0) AS photo
            FROM deviations d JOIN shipments s ON s.channel=d.channel AND s.ship_id=d.ship_id
+           LEFT JOIN photos f ON f.ean=d.ean
            LEFT JOIN listings l ON l.channel=d.channel AND l.ean=d.ean
            LEFT JOIN products p ON p.ean=d.ean
            WHERE d.channel=? AND d.resolved_at IS NULL AND d.handled_at IS NULL

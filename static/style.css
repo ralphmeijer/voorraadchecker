@@ -140,3 +140,10 @@ input[type=search] { width: min(360px, 100%); }
 .tab img { border-radius: 6px; display: block; object-fit: contain; }
 .tab .mono { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; background: var(--track);
   font-size: 13px; font-weight: 700; color: var(--ink); }
+
+/* Artikelfoto's */
+.prod { display: flex; align-items: center; gap: 10px; }
+.ptext { display: block; min-width: 0; }
+.thumb { flex: none; width: 44px; height: 44px; border-radius: 8px; object-fit: contain; background: #fff; border: 1px solid var(--line); }
+.thumb.none { display: inline-block; background: var(--track); border-style: dashed; }
+.photo { display: block; width: 220px; height: 220px; object-fit: contain; background: #fff; border: 1px solid var(--line); border-radius: 12px; margin-top: 16px; }
