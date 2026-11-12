@@ -19,7 +19,8 @@ def weekly(conn, send: bool = True) -> bool:
             print("%s: nog geen gegevens, weekadvies overgeslagen" % ch["name"])
             continue
         todo = calc.logistics_rows(result)
-        frozen = [{k: r[k] for k in ("ean", "article_code", "name", "unit", "units", "deliver", "status", "stock", "cover")}
+        frozen = [{k: r[k] for k in ("ean", "article_code", "name", "unit", "units", "deliver", "need", "status", "stock", "cover",
+                             "inbound", "ordered", "photo")}
                   for r in todo]
         conn.execute("INSERT INTO snapshots(channel, date, created_at, data) VALUES(?,?,datetime('now','localtime'),?)",
                      (ch["code"], result["ref_date"], json.dumps({"params": result["params"], "rows": frozen})))

@@ -4,6 +4,7 @@ from __future__ import annotations
 import email
 import email.policy
 import io
+import json
 import mimetypes
 import re
 import threading
@@ -189,8 +190,25 @@ class Handler(BaseHTTPRequestHandler):
                 (code, (date.today() - timedelta(days=14)).isoformat())).fetchall()
             last = conn.execute("SELECT * FROM sync_runs WHERE channel=? AND finished IS NOT NULL ORDER BY id DESC LIMIT 1", (code,)).fetchone()
             stale = (date.today() - date.fromisoformat(result["ref_date"])).days if result["ref_date"] else None
+            week = None
+            snap = conn.execute("SELECT id, date, created_at, data FROM snapshots WHERE channel=? ORDER BY id DESC LIMIT 1", (code,)).fetchone()
+            if snap:
+                seen = conn.execute("SELECT 1 FROM snapshot_seen WHERE user_id=? AND snapshot_id=?", (self.user["id"], snap["id"])).fetchone()
+                week = {"id": snap["id"], "date": snap["date"], "created_at": snap["created_at"], "seen": bool(seen),
+                        "count": len(json.loads(snap["data"]).get("rows", []))}
             return self.page("Aanvullen", views.dashboard(result, ch, self.user, handoffs, last, stale,
-                                                            shipments.open_deviations(conn, code), shipments.running(conn, code)), "aanvullen")
+                                                            shipments.open_deviations(conn, code), shipments.running(conn, code), week), "aanvullen")
+        if path == "/weekadvies":
+            wanted = (self.q.get("id") or [""])[0]
+            snap = conn.execute("SELECT * FROM snapshots WHERE channel=? AND (id=? OR ?='') ORDER BY id DESC LIMIT 1",
+                                (code, wanted if wanted.isdigit() else -1, "" if wanted.isdigit() else "")).fetchone()
+            if not snap:
+                return self.back("/", code, bad="Er is nog geen weekadvies vastgelegd")
+            conn.execute("INSERT OR IGNORE INTO snapshot_seen(user_id, snapshot_id) VALUES(?,?)", (self.user["id"], snap["id"]))
+            conn.commit()
+            others = conn.execute("SELECT id, date, created_at FROM snapshots WHERE channel=? AND id<>? ORDER BY id DESC LIMIT 8",
+                                  (code, snap["id"])).fetchall()
+            return self.page("Weekadvies", views.weekadvies(ch, snap, json.loads(snap["data"]), others), "aanvullen")
         if path == "/artikelen":
             result = calc.compute(conn, ch)
             status = (self.q.get("status") or [""])[0]

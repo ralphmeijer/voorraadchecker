@@ -190,7 +190,51 @@ def shipments_section(devs, ships, code, csrf):
     return out
 
 
-def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=()):
+def week_banner(week, code):
+    """Opvallende melding zolang deze gebruiker het nieuwste weekadvies nog niet heeft geopend."""
+    if not week or week["seen"]:
+        return ""
+    n = week["count"]
+    what = "%d %s aan te melden" % (n, "artikel" if n == 1 else "artikelen") if n else "niets aan te melden"
+    return ('<div class="flash new" role="status"><b>Nieuw weekadvies beschikbaar</b> van %s: %s. '
+            '<a href="/weekadvies?kanaal=%s&id=%d">Bekijk het weekadvies</a></div>') % (
+        nl_date(week["created_at"]), what, quote(code), week["id"])
+
+
+def weekadvies(ch, snap, data, others):
+    code = ch["code"]
+    rows = data.get("rows", [])
+    p = data.get("params", {})
+    if rows:
+        trs = "".join(
+            '<tr><td>%s</td><td><span class="prod">%s<span class="ptext"><span class="pname">%s</span><span class="pmeta">%s%s</span></span></span></td>'
+            '<td class="num">%s</td><td class="num">%s</td><td>%s</td></tr>' % (
+                pill(r["status"]), thumb(r["ean"], r.get("photo")), esc(r["name"] or ""), esc(r["ean"]),
+                " · " + esc(r["article_code"]) if r.get("article_code") else "",
+                nl(r.get("stock")), nl(r["cover"], 0) if r.get("cover") is not None else "–",
+                ('<b>%s</b> × %s = <b>%s</b> st' % (nl(r["units"]), nl(r["unit"]), nl(r["deliver"]))) if r.get("units")
+                else '<b>%s</b> st <span class="muted">(eenheid ontbreekt)</span>' % nl(r.get("need") or r.get("deliver")))
+            for r in rows)
+        table = ('<div class="scroll"><table class="grid"><thead><tr><th>Prioriteit</th><th>Artikel</th><th class="num">Voorraad</th>'
+                 '<th class="num">Dekking (dgn)</th><th>Aanleveren</th></tr></thead><tbody>%s</tbody></table></div>') % trs
+    else:
+        table = '<p class="calm">In dit weekadvies hoefde niets aangemeld te worden.</p>'
+    older = ""
+    if others:
+        older = '<section><h2>Eerdere weekadviezen</h2><ul class="plain">%s</ul></section>' % "".join(
+            '<li><a href="/weekadvies?kanaal=%s&id=%d">%s</a> <span class="muted">voorraadstand %s</span></li>' % (
+                quote(code), o["id"], nl_date(o["created_at"]), nl_date(o["date"])) for o in others)
+    params = ""
+    if p:
+        params = " Parameters: doel %s, lead time %s, trigger %s dagen." % (p.get("target"), p.get("lead"), p.get("trigger"))
+    return ('<p><a href="/?kanaal=%s">← Terug naar Aanvullen</a></p><h1>Weekadvies van %s</h1>'
+            '<p class="muted">Momentopname van %s, op basis van de voorraadstand van %s.%s '
+            'Dit overzicht verandert niet meer; de actuele stand staat op de pagina Aanvullen.</p>'
+            '<section>%s</section>%s') % (
+        quote(code), nl_date(snap["created_at"]), esc(snap["created_at"][:16]), nl_date(snap["date"]), params, table, older)
+
+
+def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(), week=None):
     code = ch["code"]
     rows = result["rows"]
     if not rows:
@@ -204,7 +248,7 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(
     no_unit = [r for r in rows if r["unit"] is None and r["mode"] == "normaal"]
     csrf = esc(user["csrf"])
 
-    warn = ""
+    warn = week_banner(week, code)
     if last_run and not last_run["ok"]:
         warn += '<div class="flash bad" role="alert">De laatste verversing is mislukt: %s</div>' % esc(last_run["message"] or "")
     if stale_days is not None and stale_days >= 2:
@@ -271,9 +315,11 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(
         unit_html = '<div class="flash warn">%d artikelen hebben nog geen besteleenheid. <a href="/artikelen?kanaal=%s&zonder=1">Bekijk en vul aan</a></div>' % (len(no_unit), quote(code))
 
     return ('%s<div class="headrow"><div><h1>Aanvullen</h1><p class="muted">%s</p></div>'
-            '<a class="button" href="/export.xlsx?kanaal=%s">Excel voor logistiek</a></div>%s%s'
+            '<div class="actions">%s<a class="button" href="/export.xlsx?kanaal=%s">Excel voor logistiek</a></div></div>%s%s'
             '<section><h2>Nu aanmelden</h2>%s</section>%s%s%s') % (
-        warn, freshness(result, last_run), quote(code), tiles, unit_html, todo_html,
+        warn, freshness(result, last_run),
+        '<a class="button" href="/weekadvies?kanaal=%s&id=%d">Weekadvies van %s</a>' % (quote(code), week["id"], nl_date(week["created_at"])[:-5]) if week else "",
+        quote(code), tiles, unit_html, todo_html,
         shipments_section(devs, ships, code, csrf), done_html, att_html)
 
 
