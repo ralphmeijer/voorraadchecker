@@ -80,7 +80,20 @@ class Handler(BaseHTTPRequestHandler):
             flash = ("bad", self.q["fout"][0][:300])
         # Wachtpagina's verversen ook zonder script: de browser volgt de Refresh-kop.
         headers = [("Refresh", "4; url=%s?kanaal=%s" % (urlparse(self.path).path, quote(self.ch["code"])))] if 'data-refresh="' in body and self.ch else None
-        self.send(200, views.layout(title, body, self.user, self.chans, self.ch["code"] if self.ch else None, active, flash), headers=headers)
+        info = None
+        if active and self.user:
+            info = {"_today": date.today().isoformat()}
+            for c in self.chans:
+                code = c["code"]
+                info[code] = {
+                    "articles": self.conn.execute(
+                        "SELECT COUNT(*) FROM stock s WHERE channel=? AND date=(SELECT MAX(date) FROM stock WHERE channel=?) "
+                        "AND (stock>0 OR EXISTS (SELECT 1 FROM inbound i WHERE i.channel=s.channel AND i.ean=s.ean))", (code, code)).fetchone()[0],
+                    "devs": len(shipments.open_deviations(self.conn, code)),
+                    "ships": len(shipments.running(self.conn, code)),
+                    "last": (self.conn.execute("SELECT MAX(finished) FROM sync_runs WHERE channel=? AND ok=1", (code,)).fetchone()[0] or ""),
+                }
+        self.send(200, views.layout(title, body, self.user, self.chans, self.ch["code"] if self.ch else None, active, flash, info), headers=headers)
 
     def cookie(self, token, max_age):
         secure = "; Secure" if config.get("VC_COOKIE_SECURE", "0") == "1" else ""
@@ -182,7 +195,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(404, "Niet gevonden", "text/plain; charset=utf-8")
             return self.send(200, target.read_bytes(), "image/jpeg", [("Cache-Control", "private, max-age=86400")])
         if ch is None:
-            return self.page("Voorraadchecker", "<h1>Er is nog geen kanaal ingesteld</h1>")
+            return self.page("Dexxon Replenishment", "<h1>Er is nog geen kanaal ingesteld</h1>")
         code = ch["code"]
         if path == "/":
             result = calc.compute(conn, ch)
