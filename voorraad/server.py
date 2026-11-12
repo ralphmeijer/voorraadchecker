@@ -13,8 +13,8 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import auth, calc, config, db, excel, photos, report_import, shipments, sync, views
-from .channels import get_adapter
+from . import auth, calc, config, db, drafts, excel, photos, report_import, shipments, sync, views
+from .channels import ChannelError, get_adapter
 from .masterdata import norm_ean
 
 STATIC = config.ROOT / "static"
@@ -197,7 +197,38 @@ class Handler(BaseHTTPRequestHandler):
                 week = {"id": snap["id"], "date": snap["date"], "created_at": snap["created_at"], "seen": bool(seen),
                         "count": len(json.loads(snap["data"]).get("rows", []))}
             return self.page("Aanvullen", views.dashboard(result, ch, self.user, handoffs, last, stale,
-                                                            shipments.open_deviations(conn, code), shipments.running(conn, code), week), "aanvullen")
+                                                            shipments.open_deviations(conn, code), shipments.running(conn, code), week,
+                                                            drafts.can_create(get_adapter(ch)), drafts.open_drafts(conn, code)), "aanvullen")
+        if path == "/zending/nieuw":
+            if not drafts.can_create(get_adapter(ch)):
+                return self.back("/", code, bad="Voor dit kanaal kunnen nog geen zendingen worden aangemaakt")
+            return self.page("Zending voorbereiden", views.new_shipment(calc.compute(conn, ch), ch, self.user), "aanvullen")
+        m = re.fullmatch(r"/zending/(\d+)", path)
+        if m:
+            draft = drafts.get(conn, code, int(m.group(1)))
+            if not draft:
+                return self.back("/", code, bad="Deze voorbereiding bestaat niet")
+            adapter = get_adapter(ch)
+            note = None
+            try:
+                drafts.refresh(conn, ch, adapter, draft)
+            except ChannelError as e:
+                note = str(e)
+            draft = drafts.get(conn, code, draft["id"])
+            groups, unassigned, all_lines = drafts.detail(conn, draft)
+            dates, refs = [], {}
+            if draft["status"] == "klaar":
+                dates = drafts.delivery_dates(adapter)
+                taken = []
+                for item in groups:
+                    if item["g"]["state"] in ("open", "mislukt") and not item["g"]["reference"]:
+                        refs[item["g"]["group_no"]] = drafts.next_reference(conn, code, taken)
+                        taken.append(refs[item["g"]["group_no"]])
+            body = views.shipment_page(ch, self.user, draft, groups, unassigned, all_lines, dates, refs,
+                                       drafts.TRANSPORTERS, getattr(adapter, "demo", False))
+            if note:
+                body = '<div class="flash bad" role="alert">%s</div>' % views.esc(note) + body
+            return self.page("Zending voorbereiden", body, "aanvullen")
         if path == "/weekadvies":
             wanted = (self.q.get("id") or [""])[0]
             snap = conn.execute("SELECT * FROM snapshots WHERE channel=? AND (id=? OR ?='') ORDER BY id DESC LIMIT 1",
@@ -278,6 +309,48 @@ class Handler(BaseHTTPRequestHandler):
                          (code, ean, units, pieces, user["username"]))
             conn.commit()
             return self.back("/", code, ok="Afgevinkt als aangemeld: %d stuks" % pieces)
+        if path == "/zending/nieuw":
+            adapter = get_adapter(ch)
+            if not drafts.can_create(adapter):
+                return self.back("/", code, bad="Voor dit kanaal kunnen nog geen zendingen worden aangemaakt")
+            known = {r[0] for r in conn.execute("SELECT ean FROM listings WHERE channel=?", (code,))}
+            lines = []
+            for key, value in form.items():
+                ean = norm_ean(key[2:]) if key.startswith("p_") else None
+                if not ean or ean not in known or not value:
+                    continue
+                if not value.isdigit() or int(value) > 9999:
+                    return self.back("/zending/nieuw", code, bad="Vul per artikel een heel aantal van 0 tot 9999 in")
+                lines.append((ean, int(value)))
+            try:
+                draft_id = drafts.create(conn, ch, adapter, user["username"], lines)
+            except (ValueError, ChannelError) as e:
+                conn.rollback()
+                return self.back("/zending/nieuw", code, bad=str(e))
+            return self.back("/zending/%d" % draft_id, code)
+        m = re.fullmatch(r"/zending/(\d+)/(aanmaken|annuleren|sluiten)", path)
+        if m:
+            draft = drafts.get(conn, code, int(m.group(1)))
+            if not draft:
+                return self.back("/", code, bad="Deze voorbereiding bestaat niet")
+            target = "/zending/%d" % draft["id"]
+            group_no = int(form["groep"]) if (form.get("groep") or "").isdigit() else -1
+            try:
+                if m.group(2) == "sluiten":
+                    drafts.close(conn, draft["id"])
+                    return self.back("/", code, ok="Voorbereiding gesloten")
+                if draft["status"] != "klaar":
+                    raise ValueError("Deze voorbereiding is niet meer open")
+                if m.group(2) == "aanmaken":
+                    drafts.submit_group(conn, ch, get_adapter(ch), draft, group_no, form, user["username"])
+                    return self.back(target, code, ok="De zending is naar bol gestuurd. Bol bevestigt binnen enkele ogenblikken.")
+                if form.get("zeker") != "ja":
+                    raise ValueError("Vink aan dat je de zending wilt annuleren")
+                drafts.cancel_remote(conn, ch, get_adapter(ch), draft, group_no)
+                return self.back(target, code, ok="De annulering is naar bol gestuurd.")
+            except (ValueError, ChannelError) as e:
+                conn.rollback()
+                return self.back(target, code, bad=str(e))
         if path == "/afwijking/afhandelen":
             if (form.get("id") or "").isdigit():
                 shipments.handle(conn, code, int(form["id"]), user["username"])

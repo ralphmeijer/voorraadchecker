@@ -234,7 +234,170 @@ def weekadvies(ch, snap, data, others):
         quote(code), nl_date(snap["created_at"]), esc(snap["created_at"][:16]), nl_date(snap["date"]), params, table, older)
 
 
-def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(), week=None):
+
+# --- zendingen voorbereiden en aanmaken ---------------------------------------
+def approve_bar(todo, code, csrf, can_create):
+    """Knoppen boven 'Nu aanmelden': het hele advies accorderen of eerst aanpassen."""
+    if not can_create:
+        return ""
+    adjust = '<a class="button" href="/zending/nieuw?kanaal=%s">%s</a>' % (
+        quote(code), "Aanpassen en zending voorbereiden" if todo else "Zelf een zending samenstellen")
+    if not todo:
+        return '<div class="approve">%s</div>' % adjust
+    hidden = "".join('<input type="hidden" name="p_%s" value="%d">' % (r["ean"], r["deliver"]) for r in todo)
+    return ('<div class="approve"><form method="post" action="/zending/nieuw"><input type="hidden" name="csrf" value="%s">'
+            '<input type="hidden" name="kanaal" value="%s">%s<button class="primary">Hele advies accorderen (%d artikelen, %s stuks)</button></form>%s'
+            '<span class="muted">Er wordt nog niets aangemaakt: bol geeft eerst de magazijnadressen terug.</span></div>') % (
+        csrf, esc(code), hidden, len(todo), nl(sum(r["deliver"] for r in todo)), adjust)
+
+
+def drafts_section(open_drafts, code):
+    if not open_drafts:
+        return ""
+    label = {"adressen": "Wacht op adressen van bol", "klaar": "Klaar om aan te maken", "mislukt": "Mislukt"}
+    trs = "".join(
+        '<tr><td><a href="/zending/%d?kanaal=%s"><b>Voorbereiding %d</b></a><span class="pmeta">%s door %s</span></td>'
+        '<td>%s</td><td class="num">%d</td><td class="num">%s</td><td class="num">%d van %d</td></tr>' % (
+            d["id"], quote(code), d["id"], esc(d["created_at"][:16]), esc(d["username"] or ""),
+            esc(label.get(d["status"], d["status"])), d["n_lines"], nl(d["pieces"]), d["n_done"], d["n_groups"])
+        for d in open_drafts)
+    return ('<section><h2>Zendingen in voorbereiding</h2><div class="scroll"><table class="grid"><thead><tr><th>Voorbereiding</th>'
+            '<th>Stand</th><th class="num">Artikelen</th><th class="num">Stuks</th><th class="num">Aangemaakt</th></tr></thead>'
+            '<tbody>%s</tbody></table></div></section>') % trs
+
+
+def new_shipment(result, ch, user):
+    code = ch["code"]
+    rows = [r for r in result["rows"] if r["mode"] == "normaal"]
+    rows.sort(key=lambda r: (0 if r["need"] else 1, r["cover"] if r["cover"] is not None else 1e9))
+    trs = "".join(
+        '<tr><td>%s</td><td>%s</td><td class="num">%s</td><td>%s</td><td>%s</td><td class="num">%s</td>'
+        '<td><input class="qty" type="number" name="p_%s" min="0" max="9999" step="1" value="%s" aria-label="Aantal stuks voor %s"></td></tr>' % (
+            pill(r["status"]), product_cell(r, code), nl(r["stock"]), cover_cell(r, result["params"]), deliver_cell(r),
+            nl(r["unit"]) if r["unit"] else '<span class="missing">ontbreekt</span>',
+            r["ean"], r["deliver"] if r["need"] else "", esc(r["name"] or r["ean"]))
+        for r in rows)
+    return ('<p><a href="/?kanaal=%s">← Terug naar Aanvullen</a></p><h1>Zending voorbereiden</h1>'
+            '<p class="muted">Vul per artikel het aantal stuks in dat mee moet; leeg of 0 gaat niet mee. De geadviseerde aantallen zijn al ingevuld. '
+            'Na akkoord vraagt de tool bij bol op naar welk magazijn elk artikel moet. Er wordt dan nog niets aangemaakt.</p>'
+            '<form method="post" action="/zending/nieuw"><input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s">'
+            '<div class="scroll"><table class="grid"><thead><tr><th>Status</th><th>Artikel</th><th class="num">Voorraad</th><th>Dekking</th>'
+            '<th>Advies</th><th class="num">Besteleenheid</th><th>Meesturen (stuks)</th></tr></thead><tbody>%s</tbody></table></div>'
+            '<p class="formend"><button class="primary">Akkoord: adressen opvragen bij bol</button></p></form>') % (
+        quote(code), esc(user["csrf"]), esc(code), trs)
+
+
+def _address(a):
+    if not a:
+        return "adres onbekend"
+    return "%s %s%s, %s %s%s" % (esc(str(a.get("streetName", ""))), esc(str(a.get("houseNumber", ""))),
+                                 esc(str(a.get("houseNumberExtension") or "")), esc(str(a.get("zipCode", ""))),
+                                 esc(str(a.get("city", ""))), " (%s)" % esc(str(a["attentionOf"])) if a.get("attentionOf") else "")
+
+
+def _lines_table(lines):
+    def units(l):
+        u = l["order_unit"]
+        if not u:
+            return '<span class="missing">eenheid ontbreekt</span>'
+        if l["pieces"] % u:
+            return '<span class="missing">geen hele dozen van %d</span>' % u
+        return "%s × %s" % (nl(l["pieces"] // u), nl(u))
+    trs = "".join(
+        '<tr><td><span class="prod">%s<span class="ptext"><span class="pname">%s</span><span class="pmeta">%s%s</span></span></span></td>'
+        '<td class="num"><b>%s</b></td><td>%s</td></tr>' % (
+            thumb(l["ean"], l["photo"]), esc(l["title"] or ""), esc(l["ean"]),
+            " · " + esc(l["article_code"]) if l["article_code"] else "", nl(l["pieces"]), units(l))
+        for l in lines)
+    return ('<div class="scroll"><table class="grid"><thead><tr><th>Artikel</th><th class="num">Stuks</th><th>Dozen</th></tr></thead>'
+            '<tbody>%s</tbody></table></div>') % trs
+
+
+def shipment_page(ch, user, draft, groups, unassigned, all_lines, dates, refs, transporters, demo):
+    from .shipments import STATE_LABEL
+    code, csrf = ch["code"], esc(user["csrf"])
+    head = ('<p><a href="/?kanaal=%s">← Terug naar Aanvullen</a></p><h1>Zending voorbereiden</h1>'
+            '<p class="muted">Voorbereiding %d, gestart op %s door %s.</p>') % (quote(code), draft["id"], esc(draft["created_at"][:16]), esc(draft["username"] or ""))
+    if demo:
+        head += '<div class="flash warn">Testomgeving van bol: er wordt niets echt aangemaakt.</div>'
+    close = ('<form method="post" action="/zending/%d/sluiten" class="formend"><input type="hidden" name="csrf" value="%s">'
+             '<input type="hidden" name="kanaal" value="%s"><button class="link">Voorbereiding sluiten</button> '
+             '<span class="muted">Wat nog niet is aangemaakt vervalt; aangemaakte zendingen blijven bestaan.</span></form>') % (draft["id"], csrf, esc(code))
+    if draft["status"] == "adressen":
+        return head + ('<div class="calm" data-refresh="4"><b>Bol zoekt de magazijnadressen op.</b> Dit duurt meestal minder dan een minuut; '
+                       'deze pagina ververst vanzelf.</div><section><h2>Goedgekeurde regels</h2>%s</section>%s') % (_lines_table(all_lines), close)
+    if draft["status"] == "mislukt":
+        return head + '<div class="flash bad" role="alert">Bol kon de adressen niet bepalen: %s</div><section>%s</section>%s' % (
+            esc(draft["error"] or ""), _lines_table(all_lines), close)
+    out = [head]
+    if draft["status"] == "gesloten":
+        out.append('<div class="flash">Deze voorbereiding is gesloten.</div>')
+    if unassigned:
+        out.append('<div class="flash bad" role="alert">Voor %d artikelen gaf bol geen magazijn terug. Die kunnen niet mee in deze zending.</div>%s' % (
+            len(unassigned), _lines_table(unassigned)))
+    waiting = False
+    for n, item in enumerate(groups, 1):
+        g = item["g"]
+        pieces = sum(l["pieces"] for l in item["lines"])
+        body = _lines_table(item["lines"])
+        state = g["state"]
+        if state in ("open", "mislukt"):
+            err = '<div class="flash bad" role="alert">Aanmaken is mislukt: %s</div>' % esc(g["error"] or "") if state == "mislukt" else ""
+            if draft["status"] != "klaar":
+                form = err
+            else:
+                opts_t = "".join('<option value="%s"%s>%s</option>' % (t, " selected" if t == (g["transporter"] or "DHL") else "", "Anders" if t == "OTHER" else t) for t in transporters)
+                opts_d = "".join('<option value="%s"%s>%s</option>' % (d, " selected" if d == g["expected"] else "", nl_date(d)) for d in dates)
+                form = err + (
+                    '<form method="post" action="/zending/%d/aanmaken" class="edit"><input type="hidden" name="csrf" value="%s">'
+                    '<input type="hidden" name="kanaal" value="%s"><input type="hidden" name="groep" value="%d">'
+                    '<label>Kenmerk<input name="reference" value="%s" required pattern="[A-Z0-9]+" maxlength="30"></label>'
+                    '<label>Vervoerder<select name="transporter">%s</select></label>'
+                    '<label>Leverdatum bij bol<select name="expected" required>%s</select></label>'
+                    '<label>Aantal laadeenheden (pallets of dozen)<input name="carriers" type="number" min="1" max="66" value="%s" required></label>'
+                    '<label>Labelservice<select name="labeling"><option value="nee">Wij labelen zelf</option><option value="ja"%s>Bol labelt de artikelen</option></select></label>'
+                    '<label class="wide check"><input type="checkbox" name="gecontroleerd" value="ja" required> Ik heb de aantallen en het adres gecontroleerd</label>'
+                    '<button class="primary">Zending aanmaken bij bol</button></form>') % (
+                    draft["id"], csrf, esc(code), g["group_no"], esc(g["reference"] or refs.get(g["group_no"], "")), opts_t,
+                    opts_d or '<option value="">geen datums beschikbaar</option>', g["carriers"] or 1, " selected" if g["labeling"] else "")
+            status = '<span class="pill fill">Nog niet aangemaakt</span>'
+        elif state == "verstuurd":
+            waiting = True
+            status = '<span class="pill dead">Wordt aangemaakt</span>'
+            form = '<div class="calm"><b>Bol verwerkt de zending %s.</b> Deze pagina ververst vanzelf.</div>' % esc(g["reference"] or "")
+        elif state == "annuleren":
+            waiting = True
+            status = '<span class="pill dead">Wordt geannuleerd</span>'
+            form = '<div class="calm">Bol verwerkt de annulering. Deze pagina ververst vanzelf.</div>'
+        elif state == "aangemaakt":
+            status = '<span class="pill ok">Aangemaakt bij bol</span>'
+            err = '<div class="flash bad" role="alert">%s</div>' % esc(g["error"]) if g["error"] else ""
+            form = err + ('<p>Zending <b>%s</b> staat in het bol-verkopersportaal (nummer %s): %s, leverdatum %s, %s laadeenheden, %s. '
+                          'Aangemaakt door %s op %s.</p>'
+                          '<form method="post" action="/zending/%d/annuleren" class="inline"><input type="hidden" name="csrf" value="%s">'
+                          '<input type="hidden" name="kanaal" value="%s"><input type="hidden" name="groep" value="%d">'
+                          '<label class="check"><input type="checkbox" name="zeker" value="ja" required> Ik wil deze zending bij bol annuleren</label>'
+                          '<button class="button">Annuleren bij bol</button></form>'
+                          '<p class="muted">Annuleren kan alleen zolang de zending bij bol nog op "Aangemeld" staat.</p>') % (
+                esc(g["reference"] or ""), esc(g["ship_id"] or "onbekend"), esc(g["transporter"] or ""), nl_date(g["expected"]),
+                g["carriers"], "bol labelt" if g["labeling"] else "zelf labelen", esc(g["created_by"] or ""), esc((g["created_at"] or "")[:16]),
+                draft["id"], csrf, esc(code), g["group_no"])
+        elif state == "geannuleerd":
+            status = '<span class="pill dead">Geannuleerd bij bol</span>'
+            form = '<p class="muted">Zending %s is bij bol geannuleerd.</p>' % esc(g["reference"] or "")
+        else:
+            status = '<span class="pill dead">Vervallen</span>'
+            form = ""
+        out.append('<section class="ship"><div class="headrow"><div><h2>Deelzending %d naar %s</h2><p class="muted">%d artikelen, %s stuks</p></div>%s</div>%s%s</section>' % (
+            n, _address(item["address"]), len(item["lines"]), nl(pieces), status, body, form))
+    if waiting:
+        out.append('<span data-refresh="4"></span>')
+    if draft["status"] == "klaar":
+        out.append(close)
+    return "".join(out)
+
+
+def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(), week=None, can_create=False, open_drafts=()):
     code = ch["code"]
     rows = result["rows"]
     if not rows:
@@ -316,11 +479,11 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(
 
     return ('%s<div class="headrow"><div><h1>Aanvullen</h1><p class="muted">%s</p></div>'
             '<div class="actions">%s<a class="button" href="/export.xlsx?kanaal=%s">Excel voor logistiek</a></div></div>%s%s'
-            '<section><h2>Nu aanmelden</h2>%s</section>%s%s%s') % (
+            '<section><h2>Nu aanmelden</h2>%s%s</section>%s%s%s%s') % (
         warn, freshness(result, last_run),
         '<a class="button" href="/weekadvies?kanaal=%s&id=%d">Weekadvies van %s</a>' % (quote(code), week["id"], nl_date(week["created_at"])[:-5]) if week else "",
-        quote(code), tiles, unit_html, todo_html,
-        shipments_section(devs, ships, code, csrf), done_html, att_html)
+        quote(code), tiles, unit_html, approve_bar(todo, code, csrf, can_create), todo_html,
+        drafts_section(open_drafts, code), shipments_section(devs, ships, code, csrf), done_html, att_html)
 
 
 def articles(result, ch, status_filter, only_no_unit):

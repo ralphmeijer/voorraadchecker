@@ -58,6 +58,10 @@ def compute(conn, ch):
             continue
         marked[r["ean"]] = marked.get(r["ean"], 0) + (r["pieces"] or 0)
 
+    from .drafts import pending_inbound
+    for ean, n in pending_inbound(conn, code).items():
+        marked[ean] = marked.get(ean, 0) + n
+
     days_v = [(refd - timedelta(days=i)).isoformat() for i in range(V, 0, -1)]  # oud -> nieuw
     half = V // 2
     from .photos import available

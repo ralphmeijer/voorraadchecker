@@ -31,6 +31,10 @@ class BolChannel(Channel):
         self._token = None
         self._token_until = 0.0
         self._last = {}
+        # BOL_DEMO=1 gebruikt de testomgeving van bol: vaste voorbeeldantwoorden, geen echte wijzigingen.
+        self.demo = config.get("BOL_DEMO") == "1"
+        self.api = "https://api.bol.com/retailer-demo" if self.demo else API
+        self.shared = "https://api.bol.com/shared-demo" if self.demo else "https://api.bol.com/shared"
 
     def configured(self) -> bool:
         return bool(self.client_id and self.client_secret)
@@ -60,7 +64,7 @@ class BolChannel(Channel):
     def _get(self, kind: str, path: str, params: dict = None):
         if not self.configured():
             raise ChannelError("De bol API-gegevens ontbreken in config.env")
-        url = API + path
+        url = self.api + path
         if params:
             url += "?" + urllib.parse.urlencode(params)
         for attempt in range(4):
@@ -97,6 +101,79 @@ class BolChannel(Channel):
                     continue
                 raise ChannelError("Bol is niet bereikbaar: %s" % e.reason)
         raise ChannelError("Bol API blijft de aanvraag weigeren (limiet bereikt) op %s" % path)
+
+    def _call(self, method: str, url: str, body: dict = None):
+        """Een enkele aanroep zonder herhaling. Voor schrijfacties: een herhaalde POST zou een dubbele
+        zending kunnen aanmaken, dus bij een fout stoppen we en melden we die."""
+        if not self.configured():
+            raise ChannelError("De bol API-gegevens ontbreken in config.env")
+        headers = {"Authorization": "Bearer " + self._get_token(), "Accept": ACCEPT}
+        data = None
+        if body is not None:
+            data = json.dumps(body).encode()
+            headers["Content-Type"] = ACCEPT
+        req = urllib.request.Request(url, data=data, method=method, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                text = resp.read().decode()
+                return json.loads(text) if text.strip() else {}
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                problem = json.loads(e.read().decode())
+                detail = problem.get("detail") or problem.get("title") or ""
+                reasons = "; ".join("%s: %s" % (v.get("name"), v.get("reason")) for v in problem.get("violations") or [])
+                if reasons:
+                    detail = (detail + " " + reasons).strip()
+            except Exception:
+                pass
+            if e.code == 429:
+                raise ChannelError("Bol staat even geen nieuwe aanvragen toe (limiet bereikt). Probeer het over een minuut opnieuw.")
+            raise ChannelError("Bol meldt een fout (%s): %s" % (e.code, detail or "geen toelichting"))
+        except urllib.error.URLError as e:
+            raise ChannelError("Bol is niet bereikbaar: %s" % e.reason)
+
+    # --- zendingen aanmaken ----------------------------------------------------
+    supports_create = True
+
+    def process_status(self, process_id: str) -> dict:
+        d = self._call("GET", "%s/process-status/%s" % (self.shared, urllib.parse.quote(str(process_id))))
+        return {"status": d.get("status") or "PENDING", "entity_id": d.get("entityId"), "error": d.get("errorMessage")}
+
+    def request_destinations(self, eans: list) -> str:
+        d = self._call("POST", self.api + "/replenishments/product-destinations", {"eans": [{"ean": e} for e in eans]})
+        if not d.get("processStatusId"):
+            raise ChannelError("Bol gaf geen volgnummer terug voor het opvragen van de adressen")
+        return str(d["processStatusId"])
+
+    def get_destinations(self, destinations_id: str) -> list:
+        d = self._call("GET", "%s/replenishments/product-destinations/%s" % (self.api, urllib.parse.quote(str(destinations_id))))
+        out = []
+        for item in d.get("productDestinations") or []:
+            address = (item.get("destinationWarehouse") or {}).get("address") or item.get("destinationWarehouse") or {}
+            out.append({"address": address, "eans": [str(e.get("ean")) for e in item.get("eans") or [] if e.get("ean")]})
+        return out
+
+    def delivery_dates(self) -> list:
+        d = self._call("GET", self.api + "/replenishments/delivery-dates")
+        return [str(x)[:10] for x in d.get("deliveryDates") or []]
+
+    def create_replenishment(self, reference, lines, transporter, expected_date, labeling_by_bol, load_carriers) -> str:
+        body = {
+            "reference": reference,
+            "deliveryInfo": {"expectedDeliveryDate": expected_date, "transporterCode": transporter},
+            "labelingByBol": bool(labeling_by_bol),
+            "numberOfLoadCarriers": int(load_carriers),
+            "lines": [{"ean": ean, "quantity": int(qty)} for ean, qty in lines],
+        }
+        d = self._call("POST", self.api + "/replenishments", body)
+        if not d.get("processStatusId"):
+            raise ChannelError("Bol gaf geen volgnummer terug voor de nieuwe zending")
+        return str(d["processStatusId"])
+
+    def cancel_replenishment(self, ship_id: str) -> str:
+        d = self._call("PUT", "%s/replenishments/%s" % (self.api, urllib.parse.quote(str(ship_id))), {"state": "CANCELLED"})
+        return str(d.get("processStatusId") or "")
 
     def _pages(self, kind, path, key, params):
         for page in range(1, MAX_PAGES + 1):

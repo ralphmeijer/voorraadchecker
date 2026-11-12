@@ -19,3 +19,10 @@
   var auto = document.querySelector("[data-autosubmit]");
   if (auto) auto.addEventListener("change", function () { auto.form.submit(); });
 })();
+
+// Pagina's die op een antwoord van de marketplace wachten, verversen zichzelf.
+(function () {
+  var el = document.querySelector("[data-refresh]");
+  if (el) setTimeout(function () { location.replace(location.pathname + "?kanaal=" + (new URLSearchParams(location.search).get("kanaal") || "")); },
+    1000 * (parseInt(el.getAttribute("data-refresh"), 10) || 5));
+})();

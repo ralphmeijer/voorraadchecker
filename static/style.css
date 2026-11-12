@@ -153,3 +153,13 @@ input[type=search] { width: min(360px, 100%); }
 .flash.new a { color: inherit; text-decoration: underline; margin-left: 6px; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 ul.plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+
+/* Zending voorbereiden */
+.approve { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.approve form { margin: 0; }
+input.qty { width: 92px; border: 1px solid var(--line); background: var(--card); color: var(--ink); border-radius: 8px; padding: 6px 8px; text-align: right; }
+.formend { margin-top: 14px; }
+.ship { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+.ship .scroll { margin: 12px 0; }
+.ship .edit { border: 0; padding: 0; margin: 0; }
+.check { flex-direction: row !important; align-items: center; gap: 8px !important; color: var(--ink) !important; font-size: 14px !important; }
