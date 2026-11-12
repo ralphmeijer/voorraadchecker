@@ -365,13 +365,13 @@ def shipment_page(ch, user, draft, groups, unassigned, all_lines, dates, refs, t
                     '<input type="hidden" name="kanaal" value="%s"><input type="hidden" name="groep" value="%d">'
                     '<label>Kenmerk<input name="reference" value="%s" required pattern="[A-Z0-9]+" maxlength="30"></label>'
                     '<label>Vervoerder<select name="transporter">%s</select></label>'
-                    '<label>Leverdatum bij bol<select name="expected" required>%s</select></label>'
+                    '<label>Leverdatum bij bol (wanneer de zending daar aankomt)<select name="expected" required>%s</select></label>'
                     '<label>Aantal laadeenheden (pallets of dozen)<input name="carriers" type="number" min="1" max="66" value="%s" required></label>'
                     '<label>Labelservice<select name="labeling"><option value="nee">Wij labelen zelf</option><option value="ja"%s>Bol labelt de artikelen</option></select></label>'
                     '<label class="wide check"><input type="checkbox" name="gecontroleerd" value="ja" required> Ik heb de aantallen en het adres gecontroleerd</label>'
                     '<button class="primary">Zending aanmaken bij bol</button></form>') % (
                     draft["id"], csrf, esc(code), g["group_no"], esc(g["reference"] or refs.get(g["group_no"], "")), opts_t,
-                    opts_d or '<option value="">geen datums beschikbaar</option>', g["carriers"] or 1, " selected" if g["labeling"] else "")
+                    ('<option value="">Kies een datum</option>' + opts_d) if opts_d else '<option value="">geen datums beschikbaar</option>', g["carriers"] or 1, " selected" if g["labeling"] else "")
             status = '<span class="pill fill">Nog niet aangemaakt</span>'
         elif state == "verstuurd":
             waiting = True
