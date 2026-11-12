@@ -199,38 +199,50 @@ class AmazonChannel(Channel):
         params = {"QueryType": "DATE_RANGE", "MarketplaceId": mp, "ShipmentStatusList": statuses,
                   "LastUpdatedAfter": since + "T00:00:00Z",
                   "LastUpdatedBefore": (date.today() + timedelta(days=1)).isoformat() + "T00:00:00Z"}
-        found, token = [], None
+        found, token, seen_tokens = {}, None, set()
         for _ in range(50):
             data = self._get("shipments", "/fba/inbound/v0/shipments",
                              {"QueryType": "NEXT_TOKEN", "NextToken": token, "MarketplaceId": mp} if token else params)
             payload = data.get("payload") or {}
-            found.extend(payload.get("ShipmentData") or [])
+            page = payload.get("ShipmentData") or []
+            for s in page:
+                if s.get("ShipmentId"):
+                    found[s["ShipmentId"]] = s
             token = payload.get("NextToken")
-            if not token:
+            # Amazon geeft soms een vervolgtoken terug terwijl er niets meer volgt: stop bij een lege of herhaalde pagina.
+            if not token or token in seen_tokens or not page:
                 break
+            seen_tokens.add(token)
         out, skip = [], set(skip_ids)
         today = date.today().isoformat()
-        for s in found:
-            sid = s.get("ShipmentId")
-            if not sid or sid in skip:
+        for sid, s in found.items():
+            if sid in skip:
                 continue
             state = STATE_MAP.get(s.get("ShipmentStatus"), "ANNOUNCED")
-            lines, token = {}, None
+            # Per (SKU, Amazon-label) een regel; een herhaalde pagina overschrijft dezelfde regel en telt dus niet dubbel.
+            items, token, seen_tokens = {}, None, set()
             for _ in range(50):
-                data = self._get("shipments", "/fba/inbound/v0/shipments/%s/items" % urllib.parse.quote(sid),
-                                 {"MarketplaceId": mp, "NextToken": token} if token else {"MarketplaceId": mp})
+                if token:
+                    data = self._get("shipments", "/fba/inbound/v0/shipmentItems",
+                                     {"QueryType": "NEXT_TOKEN", "NextToken": token, "MarketplaceId": mp})
+                else:
+                    data = self._get("shipments", "/fba/inbound/v0/shipments/%s/items" % urllib.parse.quote(sid), {"MarketplaceId": mp})
                 payload = data.get("payload") or {}
+                before = len(items)
                 for it in payload.get("ItemData") or []:
-                    sku = it.get("SellerSKU")
-                    if not sku:
-                        continue
-                    line = lines.setdefault(key_for(sku), ShipmentLine(ean=key_for(sku), announced=0))
-                    line.announced += int(it.get("QuantityShipped") or 0)
-                    line.received += int(it.get("QuantityReceived") or 0)
-                    line.regular += int(it.get("QuantityReceived") or 0)
+                    if it.get("SellerSKU") and it.get("ShipmentId", sid) == sid:
+                        items[(it["SellerSKU"], it.get("FulfillmentNetworkSKU"))] = (
+                            int(it.get("QuantityShipped") or 0), int(it.get("QuantityReceived") or 0))
                 token = payload.get("NextToken")
-                if not token:
+                if not token or token in seen_tokens or len(items) == before:
                     break
+                seen_tokens.add(token)
+            lines = {}
+            for (sku, _fnsku), (shipped, received) in items.items():
+                line = lines.setdefault(key_for(sku), ShipmentLine(ean=key_for(sku), announced=0))
+                line.announced += shipped
+                line.received += received
+                line.regular += received
             # Amazon geeft geen aanmaakdatum: die staat in de naam, bijvoorbeeld "FBA STA (11/12/2026 10:57)-HAJ1".
             m = re.search(r"\((\d{2})/(\d{2})/(\d{4})", s.get("ShipmentName") or "")
             created = "%s-%s-%s" % (m.group(3), m.group(1), m.group(2)) if m else today
