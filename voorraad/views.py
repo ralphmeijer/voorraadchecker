@@ -175,6 +175,94 @@ def freshness(result, last_run):
     return " · ".join(bits)
 
 
+
+def ship_link(s, code):
+    return '<a href="/zendingen/%s?kanaal=%s"><b>%s</b></a>' % (quote(s["ship_id"]), quote(code), esc(s["reference"] or s["ship_id"]))
+
+
+def _transport(s):
+    """(vervoertekst, track-en-trace-html) voor een zending."""
+    how = " · ".join(x for x in (esc(s["carrier"] or ""), ("%d %s" % (s["boxes"], "doos" if s["boxes"] == 1 else "dozen")) if s["boxes"] else "") if x)
+    track = ""
+    if s["tracking"]:
+        numbers = json.loads(s["tracking"])
+        ups = (s["carrier"] or "").upper().startswith("UPS")
+        track = ", ".join(
+            '<a href="https://www.ups.com/track?tracknum=%s" target="_blank" rel="noopener noreferrer">%s</a>' % (quote(n), esc(n)) if ups else esc(n)
+            for n in numbers)
+    return how, track
+
+
+def shipment_list(ch, rows):
+    from .shipments import STATE_LABEL
+    code = ch["code"]
+    if not rows:
+        return '<p><a href="/?kanaal=%s">← Terug naar Aanvullen</a></p><h1>Zendingen</h1><p class="calm">Er zijn nog geen zendingen bekend voor %s.</p>' % (quote(code), esc(ch["name"]))
+    trs = "".join(
+        '<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td class="num">%d</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td></tr>' % (
+            ship_link(s, code), nl_date(s["created"]), esc(STATE_LABEL.get(s["state"], s["state"])), _transport(s)[0] or "–",
+            s["n_lines"], nl(s["announced"]), nl(s["received"]), nl(s["booked"]),
+            ('<span class="missing">%+d</span>' % (s["booked"] - s["announced"])) if s["state"] == "DONE" and s["booked"] != s["announced"] else "–")
+        for s in rows)
+    return ('<p><a href="/?kanaal=%s">← Terug naar Aanvullen</a></p><h1>Zendingen</h1>'
+            '<p class="muted">Alle zendingen naar %s die de tool kent, nieuwste eerst. Klik op een zending voor de details.</p>'
+            '<div class="scroll"><table class="grid"><thead><tr><th>Zending</th><th>Aangemeld</th><th>Status</th><th>Vervoer</th><th class="num">Artikelen</th>'
+            '<th class="num">Aangemeld (st)</th><th class="num">Ontvangen</th><th class="num">Opgeboekt</th><th class="num">Verschil</th></tr></thead>'
+            '<tbody>%s</tbody></table></div>') % (quote(code), esc(ch["name"]), trs)
+
+
+def shipment_detail(ch, ship, lines, devs):
+    from .shipments import STATE_LABEL
+    code = ch["code"]
+    how, track = _transport(ship)
+    announced = sum(l["announced"] for l in lines)
+    received = sum(l["received"] for l in lines)
+    booked = sum(l["regular"] + l["graded"] for l in lines)
+    if ship["expected"] and ship["window_start"] and ship["window_start"] != ship["expected"]:
+        expected = "%s t/m %s" % (nl_date(ship["window_start"])[:-5], nl_date(ship["expected"]))
+    else:
+        expected = nl_date(ship["expected"])
+    facts = [("Status", esc(STATE_LABEL.get(ship["state"], ship["state"]))), ("Aangemeld op", nl_date(ship["created"])),
+             ("Verwacht", expected), ("Aangekomen", nl_date(ship["arrived"])), ("Afgerond", nl_date(ship["done_at"])),
+             ("Vervoer", how or "–"), ("Track en trace", track or ('<span class="muted">nog niet beschikbaar</span>' if ship["carrier"] and ship["state"] in ("ANNOUNCED", "IN_TRANSIT") else "–")),
+             ("Aangemeld", "%s stuks, %d artikelen" % (nl(announced), len(lines))), ("Ontvangen", nl(received) + " stuks"),
+             ("Opgeboekt", nl(booked) + " stuks")]
+    facts_html = "".join('<div><dt>%s</dt><dd>%s</dd></div>' % (esc(k), v) for k, v in facts)
+    final = ship["state"] == "DONE"
+    trs = []
+    for l in lines:
+        b = l["regular"] + l["graded"]
+        diff = b - l["announced"]
+        if final and diff:
+            verschil = '<span class="missing">%+d</span>' % diff
+        elif not final and l["received"] > l["announced"]:
+            verschil = '<span class="missing">%+d ontvangen</span>' % (l["received"] - l["announced"])
+        elif final:
+            verschil = "klopt"
+        else:
+            verschil = '<span class="muted">nog niet afgerond</span>'
+        trs.append(
+            '<tr><td><a class="prod" href="/artikel/%s?kanaal=%s">%s<span class="ptext"><span class="pname">%s</span><span class="pmeta">%s</span></span></a></td>'
+            '<td class="num"><b>%s</b></td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td><td>%s</td></tr>' % (
+                l["ean"], quote(code), thumb(l["ean"], l["photo"]), esc(l["title"] or "(naam onbekend)"), ident(l["ean"], l["article_code"]),
+                nl(l["announced"]), nl(l["received"]), nl(b), nl(l["graded"]) if l["graded"] else "–", verschil))
+    table = ('<div class="scroll"><table class="grid"><thead><tr><th>Artikel</th><th class="num">Aangemeld</th><th class="num">Ontvangen</th>'
+             '<th class="num">Opgeboekt</th><th class="num">Waarvan onverkoopbaar</th><th>Verschil</th></tr></thead><tbody>%s</tbody></table></div>') % "".join(trs) \
+        if lines else '<p class="calm">Voor deze zending zijn geen artikelregels bekend.</p>'
+    dev_html = ""
+    if devs:
+        kind = {"aantal": "Aantal wijkt af", "hangt": "Blijft hangen bij opboeken"}
+        dev_html = '<section><h2>Afwijkingen</h2><ul class="plain">%s</ul></section>' % "".join(
+            '<li>%s <b>%s</b>: %s <span class="muted">(gemeld %s%s)</span></li>' % (
+                '<span class="pill %s">%s</span>' % (("dead", "Afgehandeld") if d["handled_at"] else ("ok", "Opgelost") if d["resolved_at"] else ("crit", "Open")),
+                esc(kind.get(d["kind"], d["kind"])), esc(d["detail"] or ""), nl_date(d["first_seen"]),
+                ", afgehandeld door %s" % esc(d["handled_by"] or "") if d["handled_at"] else "")
+            for d in devs)
+    return ('<p><a href="/zendingen?kanaal=%s">← Alle zendingen</a></p><h1>Zending %s</h1><p class="muted">%s</p>'
+            '<dl class="facts">%s</dl><section><h2>Artikelen in deze zending</h2>%s</section>%s') % (
+        quote(code), esc(ship["reference"] or ship["ship_id"]), esc(ch["name"]), facts_html, table, dev_html)
+
+
 def shipments_section(devs, ships, code, csrf):
     """Afwijkingen bij zendingen (met afhandelknop) en de lopende zendingen."""
     from .shipments import STATE_LABEL
@@ -187,11 +275,11 @@ def shipments_section(devs, ships, code, csrf):
                 thumb(d["ean"], d["photo"]), esc(d["title"] or ""), "" if d["ean"].startswith("29") else esc(d["ean"]))) if d["ean"] else '<span class="muted">hele zending</span>'
             mailed = '<span class="pmeta">mail verstuurd %s</span>' % esc(d["mailed_at"][:10]) if d["mailed_at"] else ""
             trs.append(
-                '<tr><td><b>%s</b><span class="pmeta">aangemeld %s</span></td><td>%s</td><td><span class="pill crit">%s</span></td>'
+                '<tr><td><a href="/zendingen/%s?kanaal=%s"><b>%s</b></a><span class="pmeta">aangemeld %s</span></td><td>%s</td><td><span class="pill crit">%s</span></td>'
                 '<td>%s</td><td>%s%s</td><td><form method="post" action="/afwijking/afhandelen">'
                 '<input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s">'
                 '<input type="hidden" name="id" value="%d"><button class="button small">Afgehandeld</button></form></td></tr>' % (
-                    esc(d["reference"] or d["ship_id"]), nl_date(d["created"]), art, what, esc(d["detail"] or ""),
+                    quote(d["ship_id"]), quote(code), esc(d["reference"] or d["ship_id"]), nl_date(d["created"]), art, what, esc(d["detail"] or ""),
                     nl_date(d["first_seen"]), mailed, csrf, esc(code), d["id"]))
         out += ('<section id="afwijkingen"><h2>Afwijkingen bij zendingen</h2><p class="muted">Verdwijnt vanzelf als de marketplace het rechtzet, of als je op Afgehandeld klikt. '
                 'Staat een afwijking er de volgende dag nog, dan gaat er een mail uit.</p>'
@@ -206,22 +294,17 @@ def shipments_section(devs, ships, code, csrf):
                 when = "verwacht %s t/m %s" % (nl_date(s["window_start"])[:-5], nl_date(s["expected"]))
             else:
                 when = "verwacht %s" % nl_date(s["expected"]) if s["expected"] else ""
-            how = " · ".join(x for x in (esc(s["carrier"] or ""), ("%d %s" % (s["boxes"], "doos" if s["boxes"] == 1 else "dozen")) if s["boxes"] else "") if x)
-            track = ""
-            if s["tracking"]:
-                numbers = json.loads(s["tracking"])
-                ups = (s["carrier"] or "").upper().startswith("UPS")
-                track = ", ".join(
-                    '<a href="https://www.ups.com/track?tracknum=%s" target="_blank" rel="noopener noreferrer">%s</a>' % (quote(n), esc(n)) if ups else esc(n)
-                    for n in numbers[:6]) + (" en %d meer" % (len(numbers) - 6) if len(numbers) > 6 else "")
-            elif s["carrier"] and s["state"] in ("ANNOUNCED", "IN_TRANSIT"):
+            how, track = _transport(s)
+            if not track and s["carrier"] and s["state"] in ("ANNOUNCED", "IN_TRANSIT"):
                 track = '<span class="muted">nog niet beschikbaar</span>'
-            trs.append('<tr><td><b>%s</b></td><td>%s</td><td>%s<span class="pmeta">%s</span></td><td>%s</td><td>%s</td><td class="num">%d</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td></tr>' % (
-                esc(s["reference"] or s["ship_id"]), nl_date(s["created"]), esc(STATE_LABEL.get(s["state"], s["state"])), esc(when), how or "–", track or "–",
+            trs.append('<tr><td>%s</td><td>%s</td><td>%s<span class="pmeta">%s</span></td><td>%s</td><td>%s</td><td class="num">%d</td><td class="num">%s</td><td class="num">%s</td><td class="num">%s</td></tr>' % (
+                ship_link(s, code), nl_date(s["created"]), esc(STATE_LABEL.get(s["state"], s["state"])), esc(when), how or "–", track or "–",
                 s["n_lines"], nl(s["announced"]), nl(s["received"]), nl(s["booked"])))
-        out += ('<section><h2>Lopende zendingen</h2><div class="scroll"><table class="grid"><thead><tr><th>Zending</th><th>Aangemeld</th><th>Status</th><th>Vervoer</th><th>Track en trace</th>'
+        out += ('<section><div class="headrow"><h2>Lopende zendingen</h2><a href="/zendingen?kanaal=%s">Alle zendingen</a></div><div class="scroll"><table class="grid"><thead><tr><th>Zending</th><th>Aangemeld</th><th>Status</th><th>Vervoer</th><th>Track en trace</th>'
                 '<th class="num">Artikelen</th><th class="num">Aangemeld (st)</th><th class="num">Ontvangen</th><th class="num">Opgeboekt</th></tr></thead>'
-                '<tbody>%s</tbody></table></div></section>') % "".join(trs)
+                '<tbody>%s</tbody></table></div></section>') % (quote(code), "".join(trs))
+    else:
+        out += '<section><p><a href="/zendingen?kanaal=%s">Alle zendingen bekijken</a></p></section>' % quote(code)
     return out
 
 

@@ -201,6 +201,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.page("Aanvullen", views.dashboard(result, ch, self.user, handoffs, last, stale,
                                                             shipments.open_deviations(conn, code), shipments.running(conn, code), week,
                                                             drafts.can_create(get_adapter(ch)), drafts.open_drafts(conn, code)), "aanvullen")
+        if path == "/zendingen":
+            return self.page("Zendingen", views.shipment_list(ch, shipments.all_shipments(conn, code)), "aanvullen")
+        m = re.fullmatch(r"/zendingen/([A-Za-z0-9_-]{1,60})", path)
+        if m:
+            ship, lines, devs = shipments.one(conn, code, m.group(1))
+            if not ship:
+                return self.back("/zendingen", code, bad="Deze zending is niet bekend")
+            return self.page("Zending %s" % (ship["reference"] or ship["ship_id"]), views.shipment_detail(ch, ship, lines, devs), "aanvullen")
         if path == "/zending/nieuw":
             if not drafts.can_create(get_adapter(ch)):
                 return self.back("/", code, bad="Voor dit kanaal kunnen nog geen zendingen worden aangemaakt")

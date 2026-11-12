@@ -130,6 +130,29 @@ def running(conn, code):
     return conn.execute(q, (code,) + OPEN_STATES).fetchall()
 
 
+def all_shipments(conn, code, limit=60):
+    """Alle zendingen met totalen, nieuwste eerst (ook afgeronde en geannuleerde)."""
+    return conn.execute(
+        """SELECT s.*, COUNT(l.ean) AS n_lines, COALESCE(SUM(l.announced),0) AS announced,
+                  COALESCE(SUM(l.received),0) AS received, COALESCE(SUM(l.regular + l.graded),0) AS booked
+           FROM shipments s LEFT JOIN shipment_lines l ON l.channel=s.channel AND l.ship_id=s.ship_id
+           WHERE s.channel=? GROUP BY s.ship_id ORDER BY s.created DESC, s.reference DESC LIMIT ?""", (code, limit)).fetchall()
+
+
+def one(conn, code, ship_id):
+    """Een zending met haar regels en alle afwijkingen (ook afgehandelde)."""
+    ship = conn.execute("SELECT * FROM shipments WHERE channel=? AND ship_id=?", (code, ship_id)).fetchone()
+    if not ship:
+        return None, [], []
+    lines = conn.execute(
+        """SELECT sl.*, COALESCE(l.title, p.name, '') AS title, p.article_code, p.order_unit, COALESCE(f.ok, 0) AS photo
+           FROM shipment_lines sl LEFT JOIN listings l ON l.channel=sl.channel AND l.ean=sl.ean
+           LEFT JOIN products p ON p.ean=sl.ean LEFT JOIN photos f ON f.ean=sl.ean
+           WHERE sl.channel=? AND sl.ship_id=? ORDER BY title""", (code, ship_id)).fetchall()
+    devs = conn.execute("SELECT * FROM deviations WHERE channel=? AND ship_id=? ORDER BY first_seen", (code, ship_id)).fetchall()
+    return ship, lines, devs
+
+
 def handle(conn, code, dev_id, username) -> None:
     conn.execute("UPDATE deviations SET handled_at=datetime('now','localtime'), handled_by=? WHERE id=? AND channel=?",
                  (username, dev_id, code))
