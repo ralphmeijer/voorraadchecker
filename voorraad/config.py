@@ -20,7 +20,7 @@ def load_env() -> dict:
             key, value = line.split("=", 1)
             env[key.strip()] = value.strip().strip('"').strip("'")
     for key, value in os.environ.items():
-        if key.startswith(("BOL_", "SMTP_", "MAIL_", "VC_")):
+        if key.startswith(("BOL_", "AMAZON_", "SMTP_", "MAIL_", "VC_")):
             env[key] = value
     return env
 

@@ -89,6 +89,14 @@ def deliver_cell(r):
     return '<b>%s</b> st <span class="muted">(eenheid ontbreekt)</span>' % nl(r["need"])
 
 
+def logo(code, name):
+    """Logo uit static/logos/<code>.png als dat bestaat, anders de eerste letter."""
+    from . import config
+    if (config.ROOT / "static" / "logos" / (code + ".png")).is_file():
+        return '<img src="/static/logos/%s.png" alt="" width="24" height="24">' % quote(code)
+    return '<span class="mono" aria-hidden="true">%s</span>' % esc((name or code)[:1].upper())
+
+
 def layout(title, body, user=None, channels=(), current=None, active="", flash=None):
     nav = ""
     if user:
@@ -99,16 +107,18 @@ def layout(title, body, user=None, channels=(), current=None, active="", flash=N
         links = "".join('<a href="%s%s"%s>%s</a>' % (href, q, ' class="on"' if key == active else "", label)
                         for href, label, key in items)
         chan = ""
-        if len(channels) > 1:
-            chan = '<form method="get" class="chan"><label class="sr" for="kanaal">Kanaal</label><select id="kanaal" name="kanaal" data-autosubmit>%s</select></form>' % "".join(
-                '<option value="%s"%s>%s</option>' % (esc(c["code"]), " selected" if c["code"] == current else "", esc(c["name"]))
+        base = {"artikelen": "/artikelen", "instellingen": "/instellingen"}.get(active, "/")
+        tabs = ""
+        if active:
+            tabs = '<div class="tabs" role="navigation" aria-label="Kanaal">%s</div>' % "".join(
+                '<a class="tab%s" href="%s?kanaal=%s"%s>%s<span>%s</span></a>' % (
+                    " on" if c["code"] == current else "", base, quote(c["code"]),
+                    ' aria-current="page"' if c["code"] == current else "", logo(c["code"], c["name"]), esc(c["name"]))
                 for c in channels)
-        elif channels:
-            chan = '<span class="chan-one">%s</span>' % esc(channels[0]["name"])
         nav = ('<header class="top"><a class="brand" href="/%s">Voorraadchecker</a>%s<nav>%s</nav>'
                '<div class="who"><a href="/account">%s</a><form method="post" action="/uitloggen">'
-               '<input type="hidden" name="csrf" value="%s"><button class="link">Uitloggen</button></form></div></header>') % (
-            q, chan, links, esc(user["username"]), esc(user["csrf"]))
+               '<input type="hidden" name="csrf" value="%s"><button class="link">Uitloggen</button></form></div></header>%s') % (
+            q, chan, links, esc(user["username"]), esc(user["csrf"]), tabs)
     note = ""
     if flash:
         note = '<div class="flash %s" role="status">%s</div>' % (esc(flash[0]), esc(flash[1]))
@@ -176,8 +186,9 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(
     code = ch["code"]
     rows = result["rows"]
     if not rows:
-        return ('<section class="empty"><h1>Nog geen gegevens</h1><p>Er is voor %s nog niets opgehaald. '
-                'Een beheerder kan bij Instellingen de bol-API koppelen of een LvB-dagrapport uploaden.</p></section>') % esc(ch["name"])
+        hint = ('Een beheerder kan bij Instellingen de bol-API koppelen of een LvB-dagrapport uploaden.' if ch["adapter"] == "bol"
+                else 'De koppeling met dit kanaal is nog niet ingesteld. Zodra de API-gegevens er zijn, verschijnen hier voorraad, verkopen en zendingen.')
+        return '<section class="empty"><h1>Nog geen gegevens</h1><p>Er is voor %s nog niets opgehaald. %s</p></section>' % (esc(ch["name"]), hint)
     todo = [r for r in rows if r["need"] > 0 and r["status"] in ("Kritiek", "Aanvullen")]
     crit = [r for r in rows if r["status"] == "Kritiek"]
     dead = [r for r in rows if r["status"] == "Dood"]
@@ -371,14 +382,19 @@ def settings(ch, user, runs, users, api_ready, mail_ready):
     api = ('<p><span class="pill ok">Gekoppeld</span> De API-gegevens staan in config.env.</p>'
            '<form method="post" action="/verversen"><input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s"><button class="button">Nu verversen</button></form>' % (csrf, code)
            ) if api_ready else '<p><span class="pill fill">Niet gekoppeld</span> Vul BOL_CLIENT_ID en BOL_CLIENT_SECRET in config.env in en herstart de dienst.</p>'
+    if ch["adapter"] == "bol":
+        api += ('<h3>LvB-dagrapport uploaden</h3><p class="muted">Startvulling van de historie, of terugvaloptie als de API niet werkt. Gebruik de originele bestandsnaam van bol.</p>'
+                '<form method="post" action="/rapport" enctype="multipart/form-data" class="inline"><input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s">'
+                '<input type="file" name="bestand" accept=".xlsx" required aria-label="LvB-dagrapport"><button class="button">Uploaden</button></form>') % (csrf, code)
+    else:
+        api = ('<p><span class="pill fill">Niet gekoppeld</span> De koppeling met %s wordt gebouwd zodra de API-gegevens er zijn. '
+               'De parameters hierboven kun je alvast instellen.</p>') % esc(ch["name"])
     mail = "De weekmail is ingesteld." if mail_ready else "De weekmail is nog niet ingesteld: vul de SMTP-gegevens en MAIL_TO in config.env in."
     return ('<h1>Instellingen</h1>'
             '<section><h2>Parameters voor %s</h2><form method="post" action="/instellingen" class="edit">'
             '<input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s">%s'
             '<button class="primary">Opslaan</button></form><p class="muted">Bestelpunt (kritiek-grens) = lead time + buffer = %d dagen.</p></section>'
-            '<section><h2>Koppeling</h2>%s<h3>LvB-dagrapport uploaden</h3><p class="muted">Startvulling van de historie, of terugvaloptie als de API niet werkt. Gebruik de originele bestandsnaam van bol.</p>'
-            '<form method="post" action="/rapport" enctype="multipart/form-data" class="inline"><input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s">'
-            '<input type="file" name="bestand" accept=".xlsx" required aria-label="LvB-dagrapport"><button class="button">Uploaden</button></form>'
+            '<section><h2>Koppeling</h2>%s'
             '<h3>Laatste verversingen</h3><div class="scroll"><table class="grid"><thead><tr><th>Wanneer</th><th>Resultaat</th><th>Melding</th></tr></thead><tbody>%s</tbody></table></div>'
             '<p class="muted">%s</p></section>'
             '<section><h2>Gebruikers</h2><div class="scroll"><table class="grid"><thead><tr><th>Gebruikersnaam</th><th>Rol</th><th></th></tr></thead><tbody>%s</tbody></table></div>'
@@ -387,7 +403,7 @@ def settings(ch, user, runs, users, api_ready, mail_ready):
             '<label>Wachtwoord (minstens 10 tekens)<input name="password" type="password" minlength="10" required autocomplete="new-password"></label>'
             '<label>Rol<select name="role"><option value="logistiek">Logistiek: bekijken en afvinken</option><option value="beheer">Beheer: alles</option></select></label>'
             '<button class="primary">Opslaan</button></form></section>') % (
-        esc(ch["name"]), csrf, code, inputs, ch["lead_days"] + ch["buffer_days"], api, csrf, code,
+        esc(ch["name"]), csrf, code, inputs, ch["lead_days"] + ch["buffer_days"], api,
         runs_html, mail, users_html, csrf)
 
 

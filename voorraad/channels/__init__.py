@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from .base import Channel, ChannelError
+from .amazon import AmazonChannel
 from .bol import BolChannel
 
 # adapter-naam (kolom channels.adapter) -> klasse
 ADAPTERS = {
     "bol": BolChannel,
+    "amazon": AmazonChannel,
 }
 
 

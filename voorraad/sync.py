@@ -69,6 +69,9 @@ def run(conn, only: str = None, backfill_days: int = 0) -> bool:
     for ch in db.channels(conn):
         if only and ch["code"] != only:
             continue
+        if not get_adapter(ch).configured():
+            print("[--] %s: nog niet gekoppeld, overgeslagen" % ch["name"])
+            continue
         cur = conn.execute("INSERT INTO sync_runs(channel, started) VALUES(?, datetime('now','localtime'))",
                            (ch["code"],))
         conn.commit()

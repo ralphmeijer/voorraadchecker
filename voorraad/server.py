@@ -212,7 +212,7 @@ class Handler(BaseHTTPRequestHandler):
             if not result["ref_date"]:
                 return self.back("/", code, bad="Er zijn nog geen gegevens om te exporteren")
             data = excel.build(result, ch["name"])
-            name = "LvB_aanvuladvies_%s.xlsx" % result["ref_date"]
+            name = "%s_aanvuladvies_%s.xlsx" % ("LvB" if ch["adapter"] == "bol" else ch["code"].capitalize(), result["ref_date"])
             return self.send(200, data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                              [("Content-Disposition", 'attachment; filename="%s"' % name)])
         if path == "/instellingen":

@@ -72,6 +72,8 @@ def init(conn: sqlite3.Connection) -> None:
     # Het eerste kanaal. Nieuwe marketplaces komen hier als extra rij bij.
     conn.execute(
         "INSERT OR IGNORE INTO channels(code, name, adapter) VALUES('bol', 'Bol.com LvB', 'bol')")
+    conn.execute(
+        "INSERT OR IGNORE INTO channels(code, name, adapter) VALUES('amazon', 'Amazon FBA', 'amazon')")
     conn.commit()
 
 
@@ -80,7 +82,7 @@ def channel(conn, code: str):
 
 
 def channels(conn):
-    return conn.execute("SELECT * FROM channels WHERE active=1 ORDER BY name").fetchall()
+    return conn.execute("SELECT * FROM channels WHERE active=1 ORDER BY CASE code WHEN 'bol' THEN 0 ELSE 1 END, name").fetchall()
 
 
 def ensure_product(conn, ean: str, title: str = "") -> None:
