@@ -8,6 +8,7 @@ LvB-voorraadchecker voor Dexxon (merken Philips en Grixx): haalt via de bol.com 
 - `vc.py` is de opdrachtregel: `init`, `masterdata`, `rapport`, `sync`, `test-api`, `weekmail`, `gebruiker`, `serve`. Lokaal starten: `.venv/bin/python vc.py serve` (poort 8768).
 - `voorraad/calc.py` bevat het rekenmodel uit de projectinstructie van Ralph (doel 60, lead time 7, buffer 7, trigger 16, velocity 14 dagen; per kanaal instelbaar).
 - `voorraad/channels/` bevat per marketplace een koppeling met hetzelfde contract (`base.py`). Nieuwe marketplace: module toevoegen, registreren in `__init__.py`, rij in tabel `channels`.
+- Versiebeheer: besloten repository `ralphmeijer/voorraadchecker` op GitHub. Naar de VPS zetten: wijzigingen vastleggen en `deploy/bijwerken.sh` draaien (push, daarna `git pull` op de VPS en herstart). De VPS heeft een eigen leessleutel.
 - Geheimen staan in `config.env` (niet in git). Ralph vult die zelf in; nooit sleutels in de chat of in de code.
 - Bol-orders: de API geeft alleen open orders plus 48 uur terug, dus de dagelijkse sync bouwt de historie op. Het LvB-dagrapport (`vc.py rapport`) is de startvulling en de terugvaloptie.
 - SSD's gaan per doos van 20. Besteleenheden nooit gokken: ontbrekende eenheid blijft leeg en wordt gemeld.
