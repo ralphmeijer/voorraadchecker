@@ -227,7 +227,7 @@ class Handler(BaseHTTPRequestHandler):
                         refs[item["g"]["group_no"]] = drafts.next_reference(conn, code, taken)
                         taken.append(refs[item["g"]["group_no"]])
             body = views.shipment_page(ch, self.user, draft, groups, unassigned, all_lines, dates, refs,
-                                       drafts.TRANSPORTERS, getattr(adapter, "demo", False))
+                                       drafts.TRANSPORTERS, getattr(adapter, "demo", False), drafts.has_remote(conn, draft["id"]))
             if note:
                 body = '<div class="flash bad" role="alert">%s</div>' % views.esc(note) + body
             return self.page("Zending voorbereiden", body, "aanvullen")
@@ -330,7 +330,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.rollback()
                 return self.back("/zending/nieuw", code, bad=str(e))
             return self.back("/zending/%d" % draft_id, code)
-        m = re.fullmatch(r"/zending/(\d+)/(aanmaken|annuleren|sluiten)", path)
+        m = re.fullmatch(r"/zending/(\d+)/(aanmaken|annuleren|sluiten|groep-verwijderen|regel-verwijderen)", path)
         if m:
             draft = drafts.get(conn, code, int(m.group(1)))
             if not draft:
@@ -340,16 +340,23 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if m.group(2) == "sluiten":
                     drafts.close(conn, draft["id"])
-                    return self.back("/", code, ok="Voorbereiding gesloten")
+                    return self.back("/", code, ok="Voorbereiding afgesloten" if drafts.has_remote(conn, draft["id"]) else "Voorbereiding verwijderd")
+                if m.group(2) == "annuleren":
+                    if form.get("zeker") != "ja":
+                        raise ValueError("Vink aan dat je de zending wilt annuleren")
+                    drafts.cancel_remote(conn, ch, get_adapter(ch), draft, group_no)
+                    return self.back(target, code, ok="De annulering is naar bol gestuurd.")
                 if draft["status"] != "klaar":
                     raise ValueError("Deze voorbereiding is niet meer open")
+                if m.group(2) == "groep-verwijderen":
+                    drafts.remove_group(conn, draft, group_no)
+                    return self.back(target, code, ok="Deelzending verwijderd")
+                if m.group(2) == "regel-verwijderen":
+                    drafts.remove_line(conn, draft, norm_ean(form.get("ean")) or "")
+                    return self.back(target, code, ok="Artikel uit de zending gehaald")
                 if m.group(2) == "aanmaken":
                     drafts.submit_group(conn, ch, get_adapter(ch), draft, group_no, form, user["username"])
                     return self.back(target, code, ok="De zending is naar bol gestuurd. Bol bevestigt binnen enkele ogenblikken.")
-                if form.get("zeker") != "ja":
-                    raise ValueError("Vink aan dat je de zending wilt annuleren")
-                drafts.cancel_remote(conn, ch, get_adapter(ch), draft, group_no)
-                return self.back(target, code, ok="De annulering is naar bol gestuurd.")
             except (ValueError, ChannelError) as e:
                 conn.rollback()
                 return self.back(target, code, bad=str(e))

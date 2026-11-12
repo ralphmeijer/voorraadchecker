@@ -170,3 +170,4 @@ input.qty { width: 92px; border: 1px solid var(--line); background: var(--card);
   animation: draai 0.9s linear infinite; }
 @keyframes draai { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+.button.danger { color: var(--crit); border-color: var(--crit); }

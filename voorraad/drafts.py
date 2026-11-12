@@ -143,6 +143,49 @@ def cancel_remote(conn, ch, adapter, draft, group_no) -> None:
     conn.commit()
 
 
+OPEN_STATES = ("open", "mislukt")
+BUSY_STATES = ("verstuurd", "annuleren")
+
+
+def _tidy(conn, draft_id) -> None:
+    """Sluit de voorbereiding vanzelf als er niets meer te doen is en er niets bij bol staat."""
+    left = conn.execute("SELECT COUNT(*) FROM draft_groups WHERE draft_id=? AND state IN ('open','mislukt','verstuurd','annuleren','aangemaakt')",
+                        (draft_id,)).fetchone()[0]
+    if not left:
+        conn.execute("UPDATE drafts SET status='gesloten' WHERE id=? AND status='klaar'", (draft_id,))
+
+
+def remove_group(conn, draft, group_no) -> None:
+    g = conn.execute("SELECT state FROM draft_groups WHERE draft_id=? AND group_no=?", (draft["id"], group_no)).fetchone()
+    if not g or g["state"] not in OPEN_STATES:
+        raise ValueError("Deze deelzending is al verstuurd en kan alleen bij bol geannuleerd worden")
+    conn.execute("UPDATE draft_groups SET state='vervallen' WHERE draft_id=? AND group_no=?", (draft["id"], group_no))
+    _tidy(conn, draft["id"])
+    conn.commit()
+
+
+def remove_line(conn, draft, ean) -> None:
+    line = conn.execute("SELECT group_no FROM draft_lines WHERE draft_id=? AND ean=?", (draft["id"], ean)).fetchone()
+    if not line:
+        raise ValueError("Dit artikel staat niet in de voorbereiding")
+    if line["group_no"] is not None:
+        g = conn.execute("SELECT state FROM draft_groups WHERE draft_id=? AND group_no=?", (draft["id"], line["group_no"])).fetchone()
+        if not g or g["state"] not in OPEN_STATES:
+            raise ValueError("Deze deelzending is al verstuurd; het artikel kan er niet meer uit")
+    conn.execute("DELETE FROM draft_lines WHERE draft_id=? AND ean=?", (draft["id"], ean))
+    if line["group_no"] is not None and not conn.execute(
+            "SELECT 1 FROM draft_lines WHERE draft_id=? AND group_no=?", (draft["id"], line["group_no"])).fetchone():
+        conn.execute("UPDATE draft_groups SET state='vervallen' WHERE draft_id=? AND group_no=?", (draft["id"], line["group_no"]))
+    _tidy(conn, draft["id"])
+    conn.commit()
+
+
+def has_remote(conn, draft_id) -> bool:
+    """Staat er van deze voorbereiding iets bij bol (aangemaakt of onderweg naar bol)?"""
+    return bool(conn.execute("SELECT 1 FROM draft_groups WHERE draft_id=? AND state IN ('verstuurd','aangemaakt','annuleren')",
+                             (draft_id,)).fetchone())
+
+
 def close(conn, draft_id) -> None:
     """Sluit een voorbereiding. Deelzendingen die nog niet verstuurd zijn, vervallen."""
     conn.execute("UPDATE draft_groups SET state='vervallen' WHERE draft_id=? AND state IN ('open','mislukt')", (draft_id,))
