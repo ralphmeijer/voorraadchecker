@@ -42,8 +42,11 @@ def sync_channel(conn, ch, backfill_days: int = 0) -> str:
         backfill_days = 30  # deze koppelingen kunnen bestellingen over een datumbereik opvragen
     orders = adapter.fetch_order_lines(backfill_days)
     returns = adapter.fetch_returns((today - timedelta(days=45)).isoformat())
+    # Afgeronde zendingen halen we niet opnieuw op, behalve als er nog een afwijking op openstaat:
+    # de marketplace kan de aantallen achteraf corrigeren, en dan moet de melding vanzelf verdwijnen.
     known_done = [r[0] for r in conn.execute(
-        "SELECT ship_id FROM shipments WHERE channel=? AND state='DONE'", (code,))]
+        """SELECT ship_id FROM shipments s WHERE channel=? AND state='DONE' AND NOT EXISTS (
+             SELECT 1 FROM deviations d WHERE d.channel=s.channel AND d.ship_id=s.ship_id AND d.resolved_at IS NULL)""", (code,))]
     ships = adapter.fetch_shipments((today - timedelta(days=shipments.HISTORY_DAYS)).isoformat(), known_done)
 
     # Alles is opgehaald; nu pas schrijven, zodat een mislukte ronde niets half achterlaat.
