@@ -84,8 +84,20 @@ def evaluate(conn, ch, today: date) -> int:
         for l in lines:
             booked = l["regular"] + l["graded"]
             if s["state"] == "DONE" and booked != l["announced"]:
-                diff = booked - l["announced"]
-                found[(s["ship_id"], l["ean"], "aantal")] = "Aangemeld %d, opgeboekt %d (%+d)" % (l["announced"], booked, diff)
+                # Maak duidelijk waar het verschil zit: niet ontvangen, nog in verwerking, of ontvangen maar niet geboekt.
+                parts = []
+                short = l["announced"] - l["received"]
+                if short > 0:
+                    parts.append("%d niet ontvangen" % short)
+                elif short < 0:
+                    parts.append("%d meer ontvangen dan aangemeld" % -short)
+                if l["in_progress"] > 0:
+                    parts.append("%d nog in verwerking" % l["in_progress"])
+                rest = l["received"] - booked - max(l["in_progress"], 0)
+                if rest > 0:
+                    parts.append("%d ontvangen maar niet opgeboekt" % rest)
+                found[(s["ship_id"], l["ean"], "aantal")] = "Aangemeld %d, ontvangen %d, opgeboekt %d%s" % (
+                    l["announced"], l["received"], booked, ": " + ", ".join(parts) if parts else "")
             elif s["state"] != "DONE" and l["received"] > l["announced"]:
                 found[(s["ship_id"], l["ean"], "aantal")] = "Aangemeld %d, al %d ontvangen (%+d)" % (
                     l["announced"], l["received"], l["received"] - l["announced"])
