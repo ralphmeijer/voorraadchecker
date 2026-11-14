@@ -89,6 +89,8 @@ class Handler(BaseHTTPRequestHandler):
                     "articles": self.conn.execute(
                         "SELECT COUNT(*) FROM stock s WHERE channel=? AND date=(SELECT MAX(date) FROM stock WHERE channel=?) "
                         "AND (stock>0 OR EXISTS (SELECT 1 FROM inbound i WHERE i.channel=s.channel AND i.ean=s.ean))", (code, code)).fetchone()[0],
+                    # "known": er zijn ooit gegevens opgehaald; pas dan geldt een kanaal als gekoppeld.
+                    "known": self.conn.execute("SELECT COUNT(*) FROM stock WHERE channel=?", (code,)).fetchone()[0],
                     "devs": len(shipments.open_deviations(self.conn, code)),
                     "ships": len(shipments.running(self.conn, code)),
                     "last": (self.conn.execute("SELECT MAX(finished) FROM sync_runs WHERE channel=? AND ok=1", (code,)).fetchone()[0] or ""),

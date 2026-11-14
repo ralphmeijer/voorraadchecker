@@ -143,6 +143,10 @@ class AmazonChannel(Channel):
                     continue
                 d = it.get("inventoryDetails") or {}
                 inbound = sum(int(d.get(k) or 0) for k in ("inboundWorkingQuantity", "inboundShippedQuantity", "inboundReceivingQuantity"))
+                # Na ontvangst zet Amazon voorraad eerst op "gereserveerd": in verwerking in het magazijn of
+                # onderweg tussen magazijnen. Die is nog niet te koop maar komt wel beschikbaar, dus telt als onderweg.
+                reserved = d.get("reservedQuantity") or {}
+                inbound += int(reserved.get("fcProcessingQuantity") or 0) + int(reserved.get("pendingTransshipmentQuantity") or 0)
                 out.append(StockRow(
                     ean=key_for(sku), stock=int(d.get("fulfillableQuantity") or 0),
                     graded=int((d.get("unfulfillableQuantity") or {}).get("totalUnfulfillableQuantity") or 0),

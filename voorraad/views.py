@@ -157,7 +157,7 @@ def layout(title, body, user=None, channels=(), current=None, active="", flash=N
             parts = []
             for c in channels:
                 i = info.get(c["code"]) or {}
-                if i.get("articles"):
+                if i.get("known"):
                     bits = ["%d artikelen" % i["articles"]]
                     if i.get("devs"):
                         bits.append("%d %s" % (i["devs"], "afwijking" if i["devs"] == 1 else "afwijkingen"))
@@ -587,7 +587,7 @@ def shipment_page(ch, user, draft, groups, unassigned, all_lines, dates, refs, t
 def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(), week=None, can_create=False, open_drafts=()):
     code = ch["code"]
     rows = result["rows"]
-    if not rows:
+    if not result["ref_date"]:
         hint = ('Een beheerder kan bij Instellingen de bol-API koppelen of een LvB-dagrapport uploaden.' if ch["adapter"] == "bol"
                 else 'De koppeling met dit kanaal is nog niet ingesteld. Zodra de API-gegevens er zijn, verschijnen hier voorraad, verkopen en zendingen.')
         return '<section class="empty"><h1>Nog geen gegevens</h1><p>Er is voor %s nog niets opgehaald. %s</p></section>' % (esc(ch["name"]), hint)
