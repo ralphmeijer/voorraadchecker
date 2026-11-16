@@ -8,25 +8,71 @@ from . import db, photos, shipments
 from .channels import ChannelError, get_adapter
 
 
+# Marketplace-SKU's die niet overeenkomen met een artikelcode uit de masterdata (door Ralph bevestigd).
+SKU_ALIASES = {                      # neemt besteleenheid, merk en foto over
+    "H9-PFXN-860J": "PHUSB32GSNOWP3",
+    "1O-PU17-WM7M": "PHHSTAE2146BK",
+}
+PHOTO_ONLY = {                       # alleen de foto; besteleenheid blijft leeg en wordt gemeld
+    "PHUSB32GSNOWP10": "PHUSB32GSNOW",
+}
+
+
+def _base(conn, code: str):
+    return conn.execute("SELECT ean, order_unit, brand FROM products WHERE ean NOT LIKE '29%' AND article_code IN (?, ?) LIMIT 1",
+                        (code, code[:-4] if code.upper().endswith("-AMZ") else code)).fetchone()
+
+
+def _photo_from(conn, src: str, key: str, photo_adapter) -> None:
+    """Neemt de foto van het basisartikel over; heeft dat er nog geen, dan eerst ophalen bij bol."""
+    if photos.path(key).is_file():
+        return
+    if not photos.path(src).is_file() and photo_adapter is not None:
+        recent = conn.execute("SELECT 1 FROM photos WHERE ean=? AND ok=0 AND checked_at >= date('now', ?)",
+                              (src, "-%d days" % photos.RETRY_DAYS)).fetchone()
+        if not recent:
+            photos.fetch_one(conn, src, photo_adapter)
+    if photos.path(src).is_file():
+        photos.copy(src, key)
+        conn.execute("INSERT OR REPLACE INTO photos(ean, ok, checked_at) VALUES(?,1,date('now'))", (key,))
+
+
 def _adopt(conn, key: str, sku: str) -> None:
     """Artikel met een interne sleutel (geen EAN bekend): zet de SKU als artikelcode en neem
-    besteleenheid, merk en foto over van het masterdata-artikel met dezelfde artikelcode."""
+    besteleenheid en merk over van het masterdata-artikel met dezelfde artikelcode."""
     p = conn.execute("SELECT article_code, order_unit, unit_source FROM products WHERE ean=?", (key,)).fetchone()
     if not p["article_code"]:
         conn.execute("UPDATE products SET article_code=? WHERE ean=?", (sku, key))
-    base = conn.execute(
-        "SELECT ean, order_unit, brand FROM products WHERE ean NOT LIKE '29%' AND article_code IN (?, ?) LIMIT 1",
-        (sku, sku[:-4] if sku.upper().endswith("-AMZ") else sku)).fetchone()
-    if not base:
+    if sku in PHOTO_ONLY:
         return
-    if p["order_unit"] is None and p["unit_source"] is None and base["order_unit"]:
+    base = _base(conn, SKU_ALIASES.get(sku, sku))
+    if base and p["order_unit"] is None and p["unit_source"] is None and base["order_unit"]:
         conn.execute("UPDATE products SET order_unit=?, unit_source=?, brand=COALESCE(brand, ?) WHERE ean=?",
                      (base["order_unit"], "overgenomen van EAN %s" % base["ean"], base["brand"], key))
-    if photos.path(base["ean"]).is_file() and not photos.path(key).is_file():
-        import shutil
-        shutil.copyfile(str(photos.path(base["ean"])), str(photos.path(key)))
-        shutil.copyfile(str(photos.path(base["ean"], small=True)), str(photos.path(key, small=True)))
-        conn.execute("INSERT OR REPLACE INTO photos(ean, ok, checked_at) VALUES(?,1,date('now'))", (key,))
+
+
+def adopt_photos(conn, stock) -> None:
+    """Foto's voor artikelen met een interne sleutel: overnemen van het masterdata-artikel."""
+    adapter = None
+    for s in stock:
+        if not (s.ean.startswith("29") and s.sku) or photos.path(s.ean).is_file():
+            continue
+        base = _base(conn, PHOTO_ONLY.get(s.sku) or SKU_ALIASES.get(s.sku, s.sku))
+        if not base:
+            continue
+        if adapter is None:
+            adapter = _photo_adapter(conn) or False
+        _photo_from(conn, base["ean"], s.ean, adapter or None)
+    conn.commit()
+
+
+def _photo_adapter(conn):
+    """De bol-koppeling levert ook foto's voor artikelen die niet in LvB liggen."""
+    ch = conn.execute("SELECT * FROM channels WHERE adapter='bol' LIMIT 1").fetchone()
+    if not ch:
+        return None
+    a = get_adapter(ch)
+    return a if a.configured() and hasattr(a, "fetch_photo_urls") else None
 
 
 def sync_channel(conn, ch, backfill_days: int = 0) -> str:
@@ -101,6 +147,7 @@ def sync_channel(conn, ch, backfill_days: int = 0) -> str:
     note = shipments.notify(conn, ch, today)
     try:
         photos.update(conn, ch, adapter)
+        adopt_photos(conn, stock)
     except Exception as e:  # foto's zijn bijzaak: een fout hier mag de ophaalronde niet laten mislukken
         print("Foto's ophalen mislukt: %s" % e)
     return "%d artikelen, %d orderregels, %d retouren, %d zendingen bijgewerkt, %d regels onderweg, %d afwijkingen%s" % (

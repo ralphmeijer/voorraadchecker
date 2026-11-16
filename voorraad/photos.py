@@ -38,29 +38,37 @@ def update(conn, ch, adapter) -> int:
     """Haalt foto's op voor artikelen van dit kanaal die er nog geen hebben. Geeft het aantal nieuwe."""
     if not hasattr(adapter, "fetch_photo_urls"):
         return 0
-    DIR.mkdir(parents=True, exist_ok=True)
     rows = conn.execute(
         """SELECT DISTINCT s.ean FROM stock s LEFT JOIN photos f ON f.ean=s.ean
            WHERE s.channel=? AND s.date=(SELECT MAX(date) FROM stock WHERE channel=?) AND s.stock>0
              AND (f.ean IS NULL OR (f.ok=0 AND f.checked_at < date('now', ?)))
            LIMIT ?""", (ch["code"], ch["code"], "-%d days" % RETRY_DAYS, PER_RUN)).fetchall()
-    new = 0
-    for r in rows:
-        ean, ok = r["ean"], 0
-        try:
-            urls = adapter.fetch_photo_urls(ean) or {}
-            big = _download(urls["medium"]) if urls.get("medium") else None
-            small = _download(urls["small"]) if urls.get("small") else None
-            if big or small:
-                path(ean).write_bytes(big or small)
-                path(ean, small=True).write_bytes(small or big)
-                ok = 1
-                new += 1
-        except (ChannelError, OSError, ValueError):
-            ok = 0  # geen foto of tijdelijk niet bereikbaar: later opnieuw proberen
-        conn.execute("INSERT OR REPLACE INTO photos(ean, ok, checked_at) VALUES(?,?,date('now'))", (ean, ok))
-        conn.commit()
-    return new
+    return sum(fetch_one(conn, r["ean"], adapter) for r in rows)
+
+
+def fetch_one(conn, ean: str, adapter) -> bool:
+    """Haalt de foto van één artikel op bij deze marketplace en legt de uitkomst vast."""
+    DIR.mkdir(parents=True, exist_ok=True)
+    ok = 0
+    try:
+        urls = adapter.fetch_photo_urls(ean) or {}
+        big = _download(urls["medium"]) if urls.get("medium") else None
+        small = _download(urls["small"]) if urls.get("small") else None
+        if big or small:
+            path(ean).write_bytes(big or small)
+            path(ean, small=True).write_bytes(small or big)
+            ok = 1
+    except (ChannelError, OSError, ValueError):
+        ok = 0  # geen foto of tijdelijk niet bereikbaar: later opnieuw proberen
+    conn.execute("INSERT OR REPLACE INTO photos(ean, ok, checked_at) VALUES(?,?,date('now'))", (ean, ok))
+    conn.commit()
+    return bool(ok)
+
+
+def copy(src: str, dst: str) -> None:
+    import shutil
+    shutil.copyfile(str(path(src)), str(path(dst)))
+    shutil.copyfile(str(path(src, small=True)), str(path(dst, small=True)))
 
 
 def available(conn) -> set:
