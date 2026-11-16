@@ -136,7 +136,8 @@ def open_deviations(conn, code):
 def running(conn, code):
     """Lopende zendingen met totalen, nieuwste eerst."""
     q = """SELECT s.*, COUNT(l.ean) AS n_lines, COALESCE(SUM(l.announced),0) AS announced,
-                  COALESCE(SUM(l.received),0) AS received, COALESCE(SUM(l.regular + l.graded),0) AS booked
+                  COALESCE(SUM(l.received),0) AS received, COALESCE(SUM(l.regular + l.graded),0) AS booked,
+                  COALESCE(SUM(MIN(l.received, COALESCE((SELECT st.stock FROM stock st WHERE st.channel=l.channel AND st.ean=l.ean ORDER BY st.date DESC LIMIT 1), 0))), 0) AS sellable
            FROM shipments s LEFT JOIN shipment_lines l ON l.channel=s.channel AND l.ship_id=s.ship_id
            WHERE s.channel=? AND s.state IN (%s) GROUP BY s.ship_id ORDER BY s.created DESC""" % ",".join("?" * len(OPEN_STATES))
     return conn.execute(q, (code,) + OPEN_STATES).fetchall()
@@ -146,7 +147,8 @@ def all_shipments(conn, code, limit=60):
     """Alle zendingen met totalen, nieuwste eerst (ook afgeronde en geannuleerde)."""
     return conn.execute(
         """SELECT s.*, COUNT(l.ean) AS n_lines, COALESCE(SUM(l.announced),0) AS announced,
-                  COALESCE(SUM(l.received),0) AS received, COALESCE(SUM(l.regular + l.graded),0) AS booked
+                  COALESCE(SUM(l.received),0) AS received, COALESCE(SUM(l.regular + l.graded),0) AS booked,
+                  COALESCE(SUM(MIN(l.received, COALESCE((SELECT st.stock FROM stock st WHERE st.channel=l.channel AND st.ean=l.ean ORDER BY st.date DESC LIMIT 1), 0))), 0) AS sellable
            FROM shipments s LEFT JOIN shipment_lines l ON l.channel=s.channel AND l.ship_id=s.ship_id
            WHERE s.channel=? GROUP BY s.ship_id ORDER BY s.created DESC, s.reference DESC LIMIT ?""", (code, limit)).fetchall()
 
@@ -157,7 +159,9 @@ def one(conn, code, ship_id):
     if not ship:
         return None, [], []
     lines = conn.execute(
-        """SELECT sl.*, COALESCE(l.title, p.name, '') AS title, p.article_code, p.order_unit, COALESCE(f.ok, 0) AS photo
+        """SELECT sl.*, COALESCE(l.title, p.name, '') AS title, p.article_code, p.order_unit, COALESCE(f.ok, 0) AS photo,
+                  MIN(sl.received, COALESCE((SELECT st.stock FROM stock st WHERE st.channel=sl.channel AND st.ean=sl.ean
+                                             ORDER BY st.date DESC LIMIT 1), 0)) AS sellable
            FROM shipment_lines sl LEFT JOIN listings l ON l.channel=sl.channel AND l.ean=sl.ean
            LEFT JOIN products p ON p.ean=sl.ean LEFT JOIN photos f ON f.ean=sl.ean
            WHERE sl.channel=? AND sl.ship_id=? ORDER BY title""", (code, ship_id)).fetchall()
