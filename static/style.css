@@ -176,7 +176,7 @@ input.qty { width: 92px; border: 1px solid var(--line); background: var(--card);
 .spin { flex: none; width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--track); border-top-color: var(--accent);
   animation: draai 0.9s linear infinite; }
 @keyframes draai { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+@media (prefers-reduced-motion: reduce) { .spin, .fresh.busy .ic { animation-duration: 3s; } }
 .button.danger { color: var(--crit); border-color: var(--crit); }
 
 /* ---- Nieuw ontwerp: lichte bovenbalk, kanaalkaarten, rijen en tijdlijn ---- */
@@ -196,8 +196,15 @@ h2 { font-size: 16px; letter-spacing: -0.01em; }
 .top nav a.on, .top nav a:hover { background: var(--bg); color: var(--ink); }
 .who { gap: 14px; color: var(--muted); }
 .top .link { color: var(--muted); opacity: 1; font-size: 13px; }
-.fresh { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); white-space: nowrap; }
+.freshf { margin: 0; display: inline-flex; }
+.fresh { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 13px; color: var(--muted); white-space: nowrap;
+  background: none; border: 0; padding: 6px 8px; margin: 0 -8px 0 0; border-radius: 8px; cursor: pointer; }
+.fresh:hover { color: var(--ink); background: var(--bg); }
+.fresh:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .fresh .ic { width: 15px; height: 15px; }
+.fresh.busy { cursor: progress; color: var(--ink); }
+.fresh.busy .ic { animation: draai 1s linear infinite; }
+.fresh.fail { color: var(--crit); }
 .avatar { display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--over-bg); color: var(--over) !important;
   font-size: 12px; font-weight: 700; text-decoration: none; }
 
@@ -264,7 +271,7 @@ h2 { font-size: 16px; letter-spacing: -0.01em; }
   .rcover, .ramount, .rstate { width: auto; text-align: left; align-items: flex-start; }
   .ship-row .rmain { flex: 1 1 100%; }
   .tl { flex: 1 1 100%; }
-  .fresh { display: none; }
+  .fresh span { display: none; }
 }
 @media (max-width: 760px) {
   .top { padding: 10px 16px; }

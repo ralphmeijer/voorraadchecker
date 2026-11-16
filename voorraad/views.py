@@ -34,6 +34,13 @@ def nl_date(iso):
     return "%d %s %s" % (int(d), months[int(m) - 1], y)
 
 
+def fresh_label(last, today):
+    """Tekst naast de ververs-pijltjes in de bovenbalk: tijd vandaag, anders datum en tijd."""
+    if not last:
+        return "Nu bijwerken"
+    return "Bijgewerkt " + (last[11:16] if last[:10] == today else nl_date(last)[:-5] + " " + last[11:16])
+
+
 def pill(status):
     return '<span class="pill %s">%s</span>' % (STATUS_CLASS.get(status, "ok"), esc(status))
 
@@ -171,9 +178,13 @@ def layout(title, body, user=None, channels=(), current=None, active="", flash=N
                     " on" if on else "", cls, " warn" if i.get("devs") else "", base, quote(c["code"]),
                     ' aria-current="page"' if on else "", logo(c["code"], c["name"]), esc(c["name"]), esc(summary)))
             cards = '<div class="chans" role="navigation" aria-label="Kanaal">%s</div>' % "".join(parts)
-            last = (info.get(current) or {}).get("last")
-            if last:
-                fresh = '<span class="fresh">%sBijgewerkt %s</span>' % (icon("refresh"), esc(last[11:16] if last[:10] == info.get("_today") else nl_date(last)[:-5] + " " + last[11:16]))
+            ci = info.get(current) or {}
+            if ci.get("known") or ci.get("running"):
+                busy = bool(ci.get("running"))
+                fresh = ('<form method="post" action="/bijwerken" class="freshf" data-sync><input type="hidden" name="csrf" value="%s">'
+                         '<input type="hidden" name="kanaal" value="%s"><button class="fresh%s" title="Nu bijwerken" aria-live="polite">%s<span>%s</span></button></form>') % (
+                    esc(user["csrf"]), esc(current), " busy" if busy else "", icon("refresh"),
+                    "Bijwerken…" if busy else esc(fresh_label(ci.get("last"), info.get("_today"))))
         initials = "".join(w[:1] for w in re.split(r"[^A-Za-z0-9]+", user["username"]) if w)[:2].upper() or "?"
         nav = ('<header class="top"><a class="brand" href="/%s"><span class="mark">%s</span><span class="bname"><b>Dexxon</b> Replenishment</span></a><nav>%s</nav>'
                '<div class="who">%s<button type="button" class="theme" data-theme-toggle title="Wissel tussen dag- en nachtmodus" aria-label="Wissel tussen dag- en nachtmodus">' + icon("moon").replace('class="ic"', 'class="ic moon"') + icon("sun").replace('class="ic"', 'class="ic sun"') + '</button><a class="avatar" href="/account" title="Mijn account: %s" aria-label="Mijn account: %s">%s</a>'

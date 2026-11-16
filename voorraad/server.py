@@ -22,6 +22,15 @@ MAX_BODY = 6 * 1024 * 1024
 _sync_lock = threading.Lock()
 
 
+def sync_running(conn, code) -> bool:
+    """Loopt er nu een ophaalronde voor dit kanaal? Ook een ronde uit de planning (cron) telt mee."""
+    if _sync_lock.locked():
+        return True
+    return bool(conn.execute(
+        "SELECT 1 FROM sync_runs WHERE channel=? AND finished IS NULL AND started >= datetime('now','localtime','-20 minutes')",
+        (code,)).fetchone())
+
+
 def _background_sync(code):
     if not _sync_lock.acquire(blocking=False):
         return
@@ -94,6 +103,7 @@ class Handler(BaseHTTPRequestHandler):
                     "devs": len(shipments.open_deviations(self.conn, code)),
                     "ships": len(shipments.running(self.conn, code)),
                     "last": (self.conn.execute("SELECT MAX(finished) FROM sync_runs WHERE channel=? AND ok=1", (code,)).fetchone()[0] or ""),
+                    "running": sync_running(self.conn, code) if self.ch and code == self.ch["code"] else False,
                 }
         self.send(200, views.layout(title, body, self.user, self.chans, self.ch["code"] if self.ch else None, active, flash, info), headers=headers)
 
@@ -199,6 +209,12 @@ class Handler(BaseHTTPRequestHandler):
         if ch is None:
             return self.page("Dexxon Replenishment", "<h1>Er is nog geen kanaal ingesteld</h1>")
         code = ch["code"]
+        if path == "/bijwerken/status":
+            last = conn.execute("SELECT finished, ok, message FROM sync_runs WHERE channel=? AND finished IS NOT NULL ORDER BY id DESC LIMIT 1",
+                                (code,)).fetchone()
+            data = {"running": sync_running(conn, code), "finished": last["finished"] if last else None,
+                    "ok": bool(last["ok"]) if last else None, "message": (last["message"] or "")[:300] if last else ""}
+            return self.send(200, json.dumps(data), "application/json; charset=utf-8")
         if path == "/":
             result = calc.compute(conn, ch)
             handoffs = conn.execute(
@@ -422,6 +438,20 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("UPDATE handoffs SET undone=1 WHERE id=? AND channel=?", (form.get("id"), code))
             conn.commit()
             return self.back("/", code, ok="Aanmelding ongedaan gemaakt")
+
+        if path == "/bijwerken":
+            # Alleen ophalen bij de marketplace; dat mogen beheer en logistiek allebei.
+            wants_json = self.headers.get("X-Requested-With") == "fetch"
+            if not get_adapter(ch).configured():
+                msg, started = "De API-gegevens voor %s ontbreken in config.env" % ch["name"], False
+            elif sync_running(conn, code):
+                msg, started = "Er loopt al een ophaalronde", True
+            else:
+                threading.Thread(target=_background_sync, args=(code,), daemon=True).start()
+                msg, started = "Bijwerken is gestart", True
+            if wants_json:
+                return self.send(200 if started else 409, json.dumps({"started": started, "message": msg}), "application/json; charset=utf-8")
+            return self.back("/", code, **({"ok": msg} if started else {"bad": msg}))
 
         # Vanaf hier alleen beheer.
         if not self.admin():

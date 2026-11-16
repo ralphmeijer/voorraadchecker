@@ -33,3 +33,57 @@
     try { localStorage.setItem("thema", nieuw); } catch (e) {}
   });
 })();
+
+// Handmatig bijwerken via de pijltjes in de bovenbalk: draaien tot de ophaalronde klaar is, dan herladen.
+(function () {
+  var form = document.querySelector("[data-sync]");
+  if (!form || !window.fetch) return;
+  var knop = form.querySelector("button");
+  var tekst = knop.querySelector("span");
+  var kanaal = form.querySelector("[name=kanaal]").value;
+  var begin = 0;
+
+  function bezig() {
+    knop.classList.add("busy");
+    knop.classList.remove("fail");
+    knop.disabled = true;
+    tekst.textContent = "Bijwerken…";
+    knop.title = "Bezig met bijwerken";
+  }
+  function mislukt(msg) {
+    knop.classList.remove("busy");
+    knop.classList.add("fail");
+    knop.disabled = false;
+    tekst.textContent = "Bijwerken mislukt";
+    knop.title = msg || "Bijwerken mislukt";
+  }
+  function volgen() {
+    if (Date.now() - begin > 20 * 60 * 1000) return mislukt("Het bijwerken duurt ongewoon lang; herlaad de pagina later");
+    fetch("/bijwerken/status?kanaal=" + encodeURIComponent(kanaal), { credentials: "same-origin", cache: "no-store" })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (s.running) return setTimeout(volgen, 3000);
+        if (s.ok === false) return mislukt(s.message);
+        location.reload();
+      })
+      .catch(function () { setTimeout(volgen, 5000); });
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (knop.classList.contains("busy")) return;
+    bezig();
+    begin = Date.now();
+    fetch(form.action, { method: "POST", body: new FormData(form), credentials: "same-origin",
+                         headers: { "X-Requested-With": "fetch" } })
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        if (!s.started) return mislukt(s.message);
+        setTimeout(volgen, 2000);
+      })
+      .catch(function () { mislukt("Geen verbinding met de server"); });
+  });
+
+  // Loopt er al een ronde (bijvoorbeeld de geplande van 06:10), dan meteen meedraaien.
+  if (knop.classList.contains("busy")) { bezig(); begin = Date.now(); setTimeout(volgen, 3000); }
+})();
