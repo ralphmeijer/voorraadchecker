@@ -174,12 +174,9 @@ def layout(title, body, user=None, channels=(), current=None, active="", flash=N
                 else:
                     summary, cls = "Nog niet gekoppeld", " empty"
                 on = c["code"] == current
-                mark = logo(c["code"], c["name"])
-                # Met een logo is de naam overbodig; hij blijft wel als tooltip en voor schermlezers.
-                name = "" if mark.startswith("<img") else '<span class="cname">%s</span>' % esc(c["name"])
-                parts.append('<a class="chan%s%s%s" href="%s?kanaal=%s" title="%s" aria-label="%s: %s"%s>%s<span class="ctext">%s<span class="csum">%s</span></span></a>' % (
+                parts.append('<a class="chan%s%s%s" href="%s?kanaal=%s"%s>%s<span class="ctext"><span class="cname">%s</span><span class="csum">%s</span></span></a>' % (
                     " on" if on else "", cls, " warn" if i.get("devs") else "", base, quote(c["code"]),
-                    esc(c["name"]), esc(c["name"]), esc(summary), ' aria-current="page"' if on else "", mark, name, esc(summary)))
+                    ' aria-current="page"' if on else "", logo(c["code"], c["name"]), esc(c["name"]), esc(summary)))
             cards = '<div class="chans" role="navigation" aria-label="Kanaal">%s</div>' % "".join(parts)
             ci = info.get(current) or {}
             if ci.get("known") or ci.get("running"):

@@ -213,15 +213,14 @@ h2 { font-size: 16px; letter-spacing: -0.01em; }
   text-decoration: none; color: var(--ink); box-shadow: var(--shadow); }
 .chan:hover { border-color: var(--muted); }
 .chan.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.chan img { width: 40px; height: 40px; border-radius: 9px; object-fit: contain; flex: none; }
+.chan img { width: 34px; height: 34px; border-radius: 9px; object-fit: contain; flex: none; }
 .chan .mono { width: 34px; height: 34px; border-radius: 9px; display: inline-grid; place-items: center; background: var(--track); font-weight: 700; flex: none; }
 .ctext { display: flex; flex-direction: column; min-width: 0; }
 .cname { font-weight: 700; font-size: 15px; }
-.csum { font-size: 14px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.csum { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chan.warn .csum { color: var(--crit); }
 .chan.empty { background: transparent; border-style: dashed; box-shadow: none; }
 .chan.empty .cname { color: var(--muted); }
-.chan.empty img { opacity: .6; }
 .tabs { display: none; }
 
 .tiles { gap: 12px; }
