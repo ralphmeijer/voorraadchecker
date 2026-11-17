@@ -257,7 +257,7 @@ def shipment_list(ch, rows):
             '<tbody>%s</tbody></table></div>%s') % (quote(code), esc(ch["name"]), '<th class="num">Nu verkoopbaar</th>' if per_article else "", trs, SELLABLE_NOTE if per_article else "")
 
 
-def shipment_detail(ch, ship, lines, devs):
+def shipment_detail(ch, ship, lines, devs, claim=None, user=None):
     from .shipments import STATE_LABEL
     code = ch["code"]
     how, track = _transport(ship)
@@ -319,16 +319,52 @@ def shipment_detail(ch, ship, lines, devs):
                 esc(kind.get(d["kind"], d["kind"])), esc(d["detail"] or ""), nl_date(d["first_seen"]),
                 ", afgehandeld door %s" % esc(d["handled_by"] or "") if d["handled_at"] else "")
             for d in devs)
-    return ('<p><a href="/zendingen?kanaal=%s">← Alle zendingen</a></p><h1>Zending %s</h1><p class="muted">%s</p>%s'
+    return ('<p><a href="/zendingen?kanaal=%s">← Alle zendingen</a></p><h1>Zending %s</h1><p class="muted">%s</p>%s%s'
             '<dl class="facts">%s</dl><section><h2>Artikelen in deze zending</h2>%s</section>%s') % (
-        quote(code), esc(ship["reference"] or ship["ship_id"]), esc(ch["name"]), verdict, facts_html, table, dev_html)
+        quote(code), esc(ship["reference"] or ship["ship_id"]), esc(ch["name"]), verdict,
+        claim_section(ch, ship, lines, claim, user) if user else "", facts_html, table, dev_html)
+
+
+def claim_status(c):
+    return "Bezwaar gemaakt op %s door %s" % (nl_date(c["created_at"]), c["username"] or "onbekend")
+
+
+def claim_section(ch, ship, lines, claim, user):
+    """Bezwaar bij bol: mail opstellen, zelf versturen, daarna hier bevestigen. Eén keer per zending."""
+    from . import claims
+    st = claims.state(ch, ship, lines, claim)
+    if st is None:
+        return ""
+    code = ch["code"]
+    hidden = '<input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s"><input type="hidden" name="ship_id" value="%s">' % (
+        esc(user["csrf"]), esc(code), esc(ship["ship_id"]))
+    if st == "gemaakt":
+        undo = ('<form method="post" action="/bezwaar/ongedaan" class="inline" data-confirm="Bezwaar weer openzetten? Doe dit alleen als de mail niet is verstuurd.">%s'
+                '<button class="link">Ongedaan maken</button></form>' % hidden) if user["role"] == "beheer" else ""
+        return '<div class="claim done"><span class="pill dead">Bezwaar</span> <b>%s</b>%s %s</div>' % (
+            esc(claim_status(claim)), " · %d stuks manco" % claim["units"] if claim["units"] else "", undo)
+    if st == "wachten":
+        return ('<div class="claim wait"><button class="button" disabled>Bezwaar maken bij bol</button>'
+                '<span class="muted">Wachten tot de zending op voorraad is gelegd voordat bezwaar gemaakt kan worden.</span></div>')
+    subject, body = claims.compose(ship, lines)
+    units = claims.shortfall(lines)
+    return ('<section class="claim open"><h2>Bezwaar maken bij bol</h2>'
+            '<p>Manco: <b>%s stuks</b>. Stuur onderstaande mail naar <b>%s</b> en bevestig daarna hier dat hij verstuurd is.</p>'
+            '<p class="actions"><a class="button primary" href="%s">Openen in mailprogramma</a> '
+            '<a class="button" href="%s" target="_blank" rel="noopener noreferrer">Openen in Outlook op het web</a> '
+            '<button type="button" class="button" data-copy="claimtekst">Kopieer tekst</button></p>'
+            '<details><summary>Mail bekijken</summary><textarea id="claimtekst" readonly rows="18">%s</textarea></details>'
+            '<form method="post" action="/bezwaar" data-confirm="Is de mail naar bol verstuurd? Daarna kan voor deze zending geen tweede bezwaar meer worden gemaakt.">%s'
+            '<input type="hidden" name="units" value="%d"><button class="button">Ik heb hem verstuurd</button></form></section>') % (
+        nl(units), esc(claims.TO), esc(claims.mailto(subject, body)), esc(claims.outlook_web(subject, body)),
+        esc("Aan: %s\nOnderwerp: %s\n\n%s" % (claims.TO, subject, body)), hidden, units)
 
 
 SELLABLE_NOTE = ('<p class="muted">Nu verkoopbaar is de voorraad die op dit moment per artikel te koop ligt, begrensd op het aantal uit de zending. '
                  'De marketplace meldt dit per artikel en niet per zending, dus na verkopen of een volgende zending is het een benadering.</p>')
 
 
-def shipments_section(devs, ships, code, csrf, per_article=False):
+def shipments_section(devs, ships, code, csrf, per_article=False, claimed=None):
     """Afwijkingen bij zendingen (met afhandelknop) en de lopende zendingen."""
     from .shipments import STATE_LABEL
     out = ""
@@ -339,6 +375,9 @@ def shipments_section(devs, ships, code, csrf, per_article=False):
             art = ('<span class="prod">%s<span class="ptext">%s<span class="pmeta">%s</span></span></span>' % (
                 thumb(d["ean"], d["photo"]), esc(d["title"] or ""), "" if d["ean"].startswith("29") else esc(d["ean"]))) if d["ean"] else '<span class="muted">hele zending</span>'
             mailed = '<span class="pmeta">mail verstuurd %s</span>' % esc(d["mailed_at"][:10]) if d["mailed_at"] else ""
+            c = (claimed or {}).get(d["ship_id"])
+            if c:
+                mailed += '<span class="pmeta">%s</span>' % esc(claim_status(c))
             trs.append(
                 '<tr><td><a href="/zendingen/%s?kanaal=%s"><b>%s</b></a><span class="pmeta">aangemeld %s</span></td><td>%s</td><td><span class="pill crit">%s</span></td>'
                 '<td>%s</td><td>%s%s</td><td><form method="post" action="/afwijking/afhandelen">'
@@ -607,7 +646,7 @@ def shipment_page(ch, user, draft, groups, unassigned, all_lines, dates, refs, t
     return "".join(out)
 
 
-def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(), week=None, can_create=False, open_drafts=()):
+def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(), week=None, can_create=False, open_drafts=(), claimed=None):
     code = ch["code"]
     rows = result["rows"]
     if not result["ref_date"]:
@@ -701,7 +740,7 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(
         warn, freshness(result, last_run),
         '<a class="button" href="/weekadvies?kanaal=%s&id=%d">Weekadvies van %s</a>' % (quote(code), week["id"], nl_date(week["created_at"])[:-5]) if week else "",
         quote(code), tiles, unit_html, approve_bar(todo, code, csrf, can_create), todo_html,
-        drafts_section(open_drafts, code, csrf), shipments_section(devs, ships, code, csrf, ch["adapter"] != "bol"), done_html, att_html)
+        drafts_section(open_drafts, code, csrf), shipments_section(devs, ships, code, csrf, ch["adapter"] != "bol", claimed), done_html, att_html)
 
 
 def articles(result, ch, status_filter, only_no_unit, user=None):

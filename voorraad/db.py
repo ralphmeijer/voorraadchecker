@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS draft_groups(
   created_by TEXT, created_at TEXT, PRIMARY KEY(draft_id, group_no));
 CREATE TABLE IF NOT EXISTS snapshot_seen(
   user_id INTEGER, snapshot_id INTEGER, PRIMARY KEY(user_id, snapshot_id));
+CREATE TABLE IF NOT EXISTS claims(
+  channel TEXT, ship_id TEXT, created_at TEXT, username TEXT, units INTEGER, PRIMARY KEY(channel, ship_id));
 CREATE TABLE IF NOT EXISTS photos(
   ean TEXT PRIMARY KEY, ok INTEGER, checked_at TEXT);
 CREATE TABLE IF NOT EXISTS handoffs(

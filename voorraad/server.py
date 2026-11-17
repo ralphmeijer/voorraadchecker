@@ -13,7 +13,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, quote, urlparse
 
-from . import auth, calc, config, db, drafts, excel, photos, report_import, shipments, sync, views
+from . import auth, calc, claims, config, db, drafts, excel, photos, report_import, shipments, sync, views
 from .channels import ChannelError, get_adapter
 from .masterdata import norm_ean
 
@@ -231,7 +231,8 @@ class Handler(BaseHTTPRequestHandler):
                         "count": len(json.loads(snap["data"]).get("rows", []))}
             return self.page("Aanvullen", views.dashboard(result, ch, self.user, handoffs, last, stale,
                                                             shipments.open_deviations(conn, code), shipments.running(conn, code), week,
-                                                            drafts.can_create(get_adapter(ch)), drafts.open_drafts(conn, code)), "aanvullen")
+                                                            drafts.can_create(get_adapter(ch)), drafts.open_drafts(conn, code),
+                                                            claims.for_channel(conn, code)), "aanvullen")
         if path == "/zendingen":
             return self.page("Zendingen", views.shipment_list(ch, shipments.all_shipments(conn, code)), "aanvullen")
         m = re.fullmatch(r"/zendingen/([A-Za-z0-9_-]{1,60})", path)
@@ -239,7 +240,8 @@ class Handler(BaseHTTPRequestHandler):
             ship, lines, devs = shipments.one(conn, code, m.group(1))
             if not ship:
                 return self.back("/zendingen", code, bad="Deze zending is niet bekend")
-            return self.page("Zending %s" % (ship["reference"] or ship["ship_id"]), views.shipment_detail(ch, ship, lines, devs), "aanvullen")
+            return self.page("Zending %s" % (ship["reference"] or ship["ship_id"]),
+                             views.shipment_detail(ch, ship, lines, devs, claims.get(conn, code, ship["ship_id"]), self.user), "aanvullen")
         if path == "/zending/nieuw":
             if not drafts.can_create(get_adapter(ch)):
                 return self.back("/", code, bad="Voor dit kanaal kunnen nog geen zendingen worden aangemaakt")
@@ -439,6 +441,19 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             return self.back("/", code, ok="Aanmelding ongedaan gemaakt")
 
+        if path == "/bezwaar":
+            ship, lines, _ = shipments.one(conn, code, form.get("ship_id", ""))
+            if not ship:
+                return self.back("/zendingen", code, bad="Deze zending is niet bekend")
+            target = "/zendingen/" + quote(ship["ship_id"])
+            st = claims.state(ch, ship, lines, claims.get(conn, code, ship["ship_id"]))
+            if st == "gemaakt":
+                return self.back(target, code, bad="Voor deze zending is al bezwaar gemaakt")
+            if st != "kan":
+                return self.back(target, code, bad="Bezwaar kan pas als de zending op voorraad is gelegd en er een manco is")
+            if not claims.record(conn, code, ship["ship_id"], user["username"], claims.shortfall(lines)):
+                return self.back(target, code, bad="Voor deze zending is al bezwaar gemaakt")
+            return self.back(target, code, ok="Bezwaar vastgelegd")
         if path == "/bijwerken":
             # Alleen ophalen bij de marketplace; dat mogen beheer en logistiek allebei.
             wants_json = self.headers.get("X-Requested-With") == "fetch"
@@ -456,6 +471,10 @@ class Handler(BaseHTTPRequestHandler):
         # Vanaf hier alleen beheer.
         if not self.admin():
             return
+        if path == "/bezwaar/ongedaan":
+            ship_id = form.get("ship_id", "")
+            claims.undo(conn, code, ship_id)
+            return self.back("/zendingen/" + quote(ship_id), code, ok="Bezwaar weer opengezet")
         if path.startswith("/artikel/"):
             ean = norm_ean(path[9:])
             if not ean or not conn.execute("SELECT 1 FROM products WHERE ean=?", (ean,)).fetchone():

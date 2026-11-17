@@ -87,3 +87,27 @@
   // Loopt er al een ronde (bijvoorbeeld de geplande van 06:10), dan meteen meedraaien.
   if (knop.classList.contains("busy")) { bezig(); begin = Date.now(); setTimeout(volgen, 3000); }
 })();
+
+// Bevestigen voordat een formulier met data-confirm wordt verstuurd, en knoppen die tekst kopiëren.
+(function () {
+  Array.prototype.forEach.call(document.querySelectorAll("form[data-confirm]"), function (f) {
+    f.addEventListener("submit", function (e) {
+      if (!window.confirm(f.getAttribute("data-confirm"))) { e.preventDefault(); return; }
+      var b = f.querySelector("button");
+      if (b) b.disabled = true;  // niet twee keer versturen
+    });
+  });
+  Array.prototype.forEach.call(document.querySelectorAll("[data-copy]"), function (b) {
+    b.addEventListener("click", function () {
+      var veld = document.getElementById(b.getAttribute("data-copy"));
+      if (!veld) return;
+      var klaar = function () { var t = b.textContent; b.textContent = "Gekopieerd"; setTimeout(function () { b.textContent = t; }, 2000); };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(veld.value).then(klaar, function () { veld.select(); document.execCommand("copy"); klaar(); });
+      } else {
+        var d = veld.closest("details"); if (d) d.open = true;
+        veld.select(); document.execCommand("copy"); klaar();
+      }
+    });
+  });
+})();
