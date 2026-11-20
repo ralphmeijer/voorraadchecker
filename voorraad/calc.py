@@ -48,13 +48,17 @@ def compute(conn, ch):
     # Welke zendingen nog als onderweg tellen bepaalt shipments.rebuild_inbound (op aankomstdatum).
     for r in conn.execute("SELECT ean, SUM(quantity) n, MAX(created) c FROM inbound WHERE channel=? GROUP BY ean", (code,)):
         inbound[r["ean"]] = [r["n"] or 0, r["c"] or ""]
-    # Door logistiek afgevinkte regels tellen als onderweg tot de API de zending zelf laat zien.
+    # Door logistiek afgevinkte regels tellen als onderweg tot de API de zending zelf laat zien:
+    # een zending met dit artikel die op of na de dag van afvinken is aangemaakt. (Niet de datum in
+    # 'inbound': bij Amazon komt die uit de voorraadopgave en is die altijd vandaag.)
     horizon = (date.today() - timedelta(days=p["lead"] + p["buffer"])).isoformat()
+    shipped = {r[0]: r[1] for r in conn.execute(
+        """SELECT sl.ean, MAX(s.created) FROM shipment_lines sl JOIN shipments s ON s.channel=sl.channel AND s.ship_id=sl.ship_id
+           WHERE sl.channel=? GROUP BY sl.ean""", (code,))}
     marked = {}
     for r in conn.execute("SELECT ean, pieces, created_at FROM handoffs WHERE channel=? AND undone=0 AND created_at>=?",
                           (code, horizon)):
-        api = inbound.get(r["ean"])
-        if api and api[1] >= r["created_at"][:10]:
+        if (shipped.get(r["ean"]) or "") >= r["created_at"][:10]:
             continue
         marked[r["ean"]] = marked.get(r["ean"], 0) + (r["pieces"] or 0)
 

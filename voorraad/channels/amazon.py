@@ -247,6 +247,10 @@ class AmazonChannel(Channel):
                 line.announced += shipped
                 line.received += received
                 line.regular += received
+            # Amazon laat een zending vaak nog dagen op RECEIVING staan terwijl alles al binnen is.
+            # Is elk artikel volledig ontvangen, dan telt de zending als opgeboekt.
+            if state == "IN_PROGRESS_AT_WH" and lines and all(l.received >= l.announced for l in lines.values()):
+                state = "DONE"
             # Amazon geeft geen aanmaakdatum: die staat in de naam, bijvoorbeeld "FBA STA (11/12/2026 10:57)-HAJ1".
             m = re.search(r"\((\d{2})/(\d{2})/(\d{4})", s.get("ShipmentName") or "")
             created = "%s-%s-%s" % (m.group(3), m.group(1), m.group(2)) if m else today

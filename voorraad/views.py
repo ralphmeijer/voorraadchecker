@@ -672,13 +672,13 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(
 
     tiles = (
         '<section class="tiles">'
-        '<div class="tile"><span class="k">%sNu aanmelden</span><span class="v">%s</span><span class="s">%s stuks in totaal</span></div>'
-        '<div class="tile %s"><span class="k">%sKritiek</span><span class="v">%s</span><span class="s">dekking onder %s dagen</span></div>'
+        '<a class="tile" href="#aanmelden"><span class="k">%sNu aanmelden</span><span class="v">%s</span><span class="s">%s stuks in totaal</span></a>'
+        '<a class="tile %s" href="/artikelen?kanaal=%s&status=Kritiek"><span class="k">%sKritiek</span><span class="v">%s</span><span class="s">dekking onder %s dagen</span></a>'
         '<a class="tile" href="/artikelen?kanaal=%s&status=Dood"><span class="k">%sDode voorraad</span><span class="v">%s</span><span class="s">%s stuks zonder verkoop</span></a>'
         '<a class="tile" href="/artikelen?kanaal=%s&status=Overstock"><span class="k">%sOverstock</span><span class="v">%s</span><span class="s">dekking boven %s dagen</span></a>'
         '</section>') % (
         icon("truck"), len(todo), nl(sum(r["deliver"] for r in todo)),
-        "alarm" if crit else "", icon("alert"), len(crit), result["params"]["reorder_point"],
+        "alarm" if crit else "", quote(code), icon("alert"), len(crit), result["params"]["reorder_point"],
         quote(code), icon("moon"), len(dead), nl(sum(r["stock"] for r in dead)),
         quote(code), icon("stack"), len(over), nl(1.5 * result["params"]["target"]))
 
@@ -736,7 +736,7 @@ def dashboard(result, ch, user, handoffs, last_run, stale_days, devs=(), ships=(
 
     return ('%s<div class="headrow"><div><h1>Aanvullen</h1><p class="muted">%s</p></div>'
             '<div class="actions">%s<a class="button" href="/export.xlsx?kanaal=%s">Excel voor logistiek</a></div></div>%s%s'
-            '<section><h2>Nu aanmelden</h2>%s%s</section>%s%s%s%s') % (
+            '<section id="aanmelden"><h2>Nu aanmelden</h2>%s%s</section>%s%s%s%s') % (
         warn, freshness(result, last_run),
         '<a class="button" href="/weekadvies?kanaal=%s&id=%d">Weekadvies van %s</a>' % (quote(code), week["id"], nl_date(week["created_at"])[:-5]) if week else "",
         quote(code), tiles, unit_html, approve_bar(todo, code, csrf, can_create), todo_html,
@@ -753,9 +753,9 @@ def articles(result, ch, status_filter, only_no_unit, user=None):
     chips = ['<a class="chip%s" href="/artikelen?kanaal=%s">Alle <b>%d</b></a>' % (
         "" if status_filter or only_no_unit else " on", quote(code), len(rows))]
     for status in ["Kritiek", "Aanvullen", "OK", "Overstock", "Dood", "Gepauzeerd", "End of life"]:
-        if counts.get(status):
+        if counts.get(status) or status == status_filter:
             chips.append('<a class="chip%s" href="/artikelen?kanaal=%s&status=%s">%s <b>%d</b></a>' % (
-                " on" if status == status_filter else "", quote(code), quote(status), esc(status), counts[status]))
+                " on" if status == status_filter else "", quote(code), quote(status), esc(status), counts.get(status, 0)))
     if status_filter:
         rows = [r for r in rows if r["status"] == status_filter]
     if only_no_unit:
@@ -778,7 +778,7 @@ def articles(result, ch, status_filter, only_no_unit, user=None):
             '<form method="post" action="/artikelen/actie">%s'
             '<div class="scroll"><table class="grid" id="tabel"><thead><tr><th><span class="sr">Selecteer</span></th><th>Status</th><th>Artikel</th><th class="num">Voorraad</th><th class="num">Onderweg</th>'
             '<th>Besteld %d dgn</th><th class="num">%s</th><th>Dekking</th><th class="num">Eenheid</th><th>Advies</th><th>Signalen</th></tr></thead>'
-            '<tbody>%s</tbody></table></div></form><p class="muted" id="leeg" hidden>Geen artikelen gevonden.</p>') % (
+            '<tbody>%s</tbody></table></div></form><p class="muted" id="leeg"%s>%s</p>') % (
         len(rows), nl_date(result["ref_date"]), "".join(chips),
         ('<div class="bulk"><input type="hidden" name="csrf" value="%s"><input type="hidden" name="kanaal" value="%s">'
          '<input type="hidden" name="terug" value="/artikelen"><label class="sr" for="actie">Actie voor de aangevinkte artikelen</label>'
@@ -787,7 +787,8 @@ def articles(result, ch, status_filter, only_no_unit, user=None):
          '<button class="button">Toepassen</button></div>') % (
             esc(user["csrf"]) if user else "", esc(code), esc(ch["name"]), esc(ch["name"]),
             '<option value="eol">End of life (alle kanalen)</option><option value="eol-opheffen">End of life opheffen</option>' if admin else ""),
-        result["params"]["velocity"], head28, "".join(trs))
+        result["params"]["velocity"], head28, "".join(trs), "" if not trs else " hidden",
+        "Er zijn nu geen artikelen met status %s." % esc(status_filter) if (status_filter and not trs) else "Geen artikelen gevonden.")
 
 
 def bars28(history):
